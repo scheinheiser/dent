@@ -8,7 +8,7 @@ type ident =
   | Udc of string (* user defined costructor *)
 
 type const = Int of int | Float of float | String of string | Char of char | Bool of bool | Unit
-type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni 
+type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni
 
 type located_pattern = Location.t * pattern
 

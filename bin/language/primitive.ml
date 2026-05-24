@@ -43,7 +43,13 @@ and ( %= ) l r = const_equality l r
 
 let rec prim_equality l r =
   match (l, r) with
-  | PInt, PInt | PFloat, PFloat | PString, PString | PChar, PChar | PBool, PBool | PUnit, PUnit | PUni, PUni  ->
+  | PInt, PInt
+  | PFloat, PFloat
+  | PString, PString
+  | PChar, PChar
+  | PBool, PBool
+  | PUnit, PUnit
+  | PUni, PUni ->
       true
   | _ -> false
 

@@ -537,10 +537,11 @@ module Parser = struct
   and parse_binding (l : Lexer.t) ~(is_imp : bool) (s : Location.t) (om : operator_map) :
       Ast.located_expr Lexer.result =
     let r_paren = if is_imp then RBRACE else RPAREN in
-    let* is = 
-      ((fun l ->
-        Lexer.separated_list l ~sep:COMMA parse_ident)
-        <|> fun l -> let@ i = parse_ident l in [i]) l
+    let* is =
+      ( (fun l -> Lexer.separated_list l ~sep:COMMA parse_ident) <|> fun l ->
+        let@ i = parse_ident l in
+        [ i ] )
+        l
     in
     let* _ =
       Lexer.consume l COLON "Expected a ':' between a type and identifier in a type binding."
@@ -550,10 +551,7 @@ module Parser = struct
     let* _ = Lexer.consume l ARROW "Expected an '->' after a type binding." in
     let@ ((e, _) as r) = parse_expr l 0 om in
     let loc = Location.combine s e in
-    List.fold_right
-      (fun n acc -> loc, Ast.Pi (Some (n, is_imp), l', acc))
-      is
-      r
+    List.fold_right (fun n acc -> (loc, Ast.Pi (Some (n, is_imp), l', acc))) is r
 
 
   and parse_record_fields (l : Lexer.t) (om : operator_map) :
