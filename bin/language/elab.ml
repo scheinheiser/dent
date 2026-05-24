@@ -158,7 +158,7 @@ let rec quote (lvl : lvl) : val_ -> tm = function
 
 
 (*
-  checks if a value can be converted into another, essentially is equality.
+  checks if a value can be converted into another, essentially equality.
   carries out β/η conversion.
  *)
 let rec conv (lvl : lvl) (l : val_) (r : val_) : bool =
@@ -254,7 +254,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result 
             Format.asprintf "Ex@[<v>pected type %a@,but inferred type %a.@]" pp_val ex pp_val t )
 
 
-and is_type (ctx : ctx) (e : Ast.located_expr) : tm result = check ctx e (VTypeLit (PUni 0))
+and is_type (ctx : ctx) (e : Ast.located_expr) : tm result = check ctx e (VTypeLit PUni)
 
 and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   match e with
@@ -273,9 +273,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
       let@ ets = List.map (infer ctx) es |> combine_errors in
       let es, ts = List.split ets in
       (Tuple es, VTuple ts)
-  | Ast.TypeLit p ->
-      let t = match p with PUni n -> PUni (n + 1) | _ -> PUni 0 in
-      ok @@ (TypeLit p, VTypeLit t)
+  | Ast.TypeLit p -> ok @@ (TypeLit p, VTypeLit PUni)
   | Ast.If (c, t, f) ->
       let t = ((loc, PConst (Bool true)), None, t) in
       let f = ((loc, PConst (Bool false)), None, f) in
@@ -300,25 +298,17 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
             (Some loc, Format.asprintf "Ex@[<v>pected a function type@,but inferred %a.@]" pp_val l')
       )
   | Ast.Pi (bind, l, r) -> (
-      let rec get_uni = function
-        | TypeLit (PUni n) -> n + 1
-        | TypeLit _ -> 0
-        | Pi (l, r) -> Int.max (get_uni l) (get_uni r)
-        | _ -> raise (Error.InternalError "Internal Error - `get_uni` called on non-type.")
-      in
       let* l = is_type ctx l in
       match bind with
       | None ->
           let* r = is_type ctx r in
-          let li, ri = (get_uni l, get_uni r) in
-          ok @@ (Pi (l, r), VTypeLit (PUni (Int.max li ri)))
+          ok @@ (Pi (l, r), VTypeLit PUni)
           (*NOTE: setting it to one here might be a bit weird *)
       | Some (i, _) ->
           (* ignoring the type of bind for now. *)
           let l' = to_val ctx.env l in
           let* r = is_type (bind_var ~id:i ~t:l' ctx) r in
-          let li, ri = (get_uni l, get_uni r) in
-          ok @@ (Pi (l, r), VTypeLit (PUni (Int.max li ri))))
+          ok @@ (Pi (l, r), VTypeLit PUni))
   | Ast.Let (p, t, b, n) -> (
       let i, b = replace_pattern p b in
       match t with

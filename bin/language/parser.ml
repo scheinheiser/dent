@@ -368,13 +368,7 @@ module Parser = struct
     | s, TY_CHAR -> ok (s, Ast.TypeLit PChar)
     | s, TY_BOOL -> ok (s, Ast.TypeLit PBool)
     | s, TY_UNIT -> ok (s, Ast.TypeLit PUnit)
-    | s, TTYPE ->
-        (match Lexer.current l with
-          | e, INT i ->
-              Lexer.skip ~am:1 l;
-              (Location.combine s e, Ast.TypeLit (PUni i))
-          | _ -> (s, Ast.TypeLit (PUni 0)) (* x : Type => x : Type 0 *))
-        |> ok
+    | s, TTYPE -> ok @@ (s, Ast.TypeLit PUni)
     | s, IDENT i -> ok (s, Ast.Var (Ident i))
     | s, UPPER_IDENT i ->
         ( ( (fun l ->
@@ -481,11 +475,7 @@ module Parser = struct
       | DOT_SEP_IDENT is ->
           let r = (s, Ast.Var (AccessIdent is)) in
           ok @@ Ast.Ap (0, left, r)
-      | TTYPE ->
-          (match Lexer.current l with
-            | e, INT i -> Ast.Ap (0, left, (Location.combine s e, Ast.TypeLit (PUni i)))
-            | _ -> Ast.Ap (0, left, (s, Ast.TypeLit (PUni 0))) (* x : Type => x : Type 0 *))
-          |> ok
+      | TTYPE -> ok @@ Ast.Ap (0, left, (s, Ast.TypeLit PUni))
       | LBRACK ->
           let@ r =
             ( (fun l ->

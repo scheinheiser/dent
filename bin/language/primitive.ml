@@ -9,7 +9,9 @@ type ident =
   | Udc of string (* user defined costructor *)
 
 type const = Int of int | Float of float | String of string | Char of char | Bool of bool | Unit
-type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni of int (* A : Type n *)
+
+(*TODO: add universal hierarchies, where the type of Uₙ is Uₙ₊₁ *)
+type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni (* A : Type *)
 
 type located_pattern = Location.t * pattern
 
@@ -41,11 +43,8 @@ and ( %= ) l r = const_equality l r
 
 let rec prim_equality l r =
   match (l, r) with
-  | PInt, PInt | PFloat, PFloat | PString, PString | PChar, PChar | PBool, PBool | PUnit, PUnit ->
+  | PInt, PInt | PFloat, PFloat | PString, PString | PChar, PChar | PBool, PBool | PUnit, PUnit | PUni, PUni  ->
       true
-  | PUni l, PUni r ->
-      let lec, rec_ = (l - 1, r - 1) in
-      l = r || lec = r || l = rec_
   | _ -> false
 
 
@@ -58,7 +57,7 @@ let show_prim = function
   | PChar -> "Char"
   | PBool -> "Bool"
   | PUnit -> "Unit"
-  | PUni ix -> Printf.sprintf "U%i" ix
+  | PUni -> "U"
 
 
 (* idents *)
