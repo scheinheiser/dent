@@ -72,12 +72,18 @@ and token =
 let show (t : token) : string =
   let open Printf in
   match t with
-  | INT i -> sprintf "INT %d" i             | TY_INT -> sprintf "TY_INT"
-  | FLOAT f -> sprintf "FLOAT %.5f" f       | TY_FLOAT -> sprintf "TY_FLOAT"
-  | STRING s -> sprintf "STRING \"%s\"" s   | TY_STRING -> sprintf "TY_STRING"
-  | CHAR c -> sprintf "CHAR %c" c           | TY_CHAR -> sprintf "TY_CHAR"
-  | BOOL b -> sprintf "BOOL %b" b           | TY_BOOL -> sprintf "TY_BOOL"
-  | UNIT -> "UNIT"                          | TY_UNIT -> "TY_UNIT"
+  | INT i -> sprintf "INT %d" i
+  | TY_INT -> sprintf "TY_INT"
+  | FLOAT f -> sprintf "FLOAT %.5f" f
+  | TY_FLOAT -> sprintf "TY_FLOAT"
+  | STRING s -> sprintf "STRING \"%s\"" s
+  | TY_STRING -> sprintf "TY_STRING"
+  | CHAR c -> sprintf "CHAR %c" c
+  | TY_CHAR -> sprintf "TY_CHAR"
+  | BOOL b -> sprintf "BOOL %b" b
+  | TY_BOOL -> sprintf "TY_BOOL"
+  | UNIT -> "UNIT"
+  | TY_UNIT -> "TY_UNIT"
   | TY_ATOM -> "TY_ATOM"
   | IDENT i -> sprintf "IDENT %s" i
   | UPPER_IDENT i -> sprintf "UPPER_IDENT %s" i
@@ -131,4 +137,3 @@ let show (t : token) : string =
   | BTICK -> "BTICK"
   | WILDCARD -> "WILDCARD"
   | EOF -> "EOF"
-[@@ocamlformat "disable"]

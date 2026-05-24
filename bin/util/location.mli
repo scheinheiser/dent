@@ -1,10 +1,4 @@
-type t =
-  { filename : string
-  ; start_line : int
-  ; end_line : int
-  ; start_col : int
-  ; end_col : int
-  }
+type t = { filename : string; start_line : int; end_line : int; start_col : int; end_col : int }
 
 val dummy_loc : t
 val pp_location : Format.formatter -> t -> unit

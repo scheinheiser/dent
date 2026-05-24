@@ -1,11 +1,11 @@
 (lang dune 3.19)
 
-(name zap)
+(name dent)
 
 (generate_opam_files true)
 
 (source
- (github scheinheiser/zap))
+ (github scheinheiser/dent))
 
 (authors "scheinheiser")
 
@@ -13,10 +13,10 @@
 
 (license LICENSE)
 
-(documentation https://github.com/scheinheiser/zap)
+(documentation https://github.com/scheinheiser/dent)
 
 (package
- (name zap)
+ (name dent)
  (synopsis "a dependently-typed, functional language")
  (description "")
  (depends ocaml)

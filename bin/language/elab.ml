@@ -1,532 +1,634 @@
+(* based on https://github.com/AndrasKovacs/elaboration-zoo *)
 open Util
 open Primitive
 
 let flip = Fun.flip
 
-(* desugared syntax *)
-type located_pattern = Location.t * pattern
+(* de bruijn indices and levels *)
+type ix = int
+type lvl = int
 
-and pattern =
-  | PWild (* _ *)
-  | PConst of located_const
-  | PBop of located_pattern * ident * located_pattern
-  | PCtor of ident * located_pattern list
-  | PTuple of located_pattern list
-
-type located_expr = Location.t * expr
-
-and expr =
-  | Bop of located_expr * binop * located_expr
-  | Ap of binder * located_expr * located_expr
+(*NOTE: removed location tracking, might be useful to keep it *)
+(* core syntax, tms *)
+type tm =
+  | Local of ix (* local variable as de bruijn index *)
+  | Ap of binder * tm * tm
   (* we give each function a binder to distinguish between user-defined functions and builtins later on *)
-  | Tuple of located_expr list
-  | Let of
-      located_pattern
-      * located_expr option
-      * located_expr
-      * located_expr (* let p₁ ... pₙ : <optional_ty> = e₁ in e₂ *)
-  | Match of located_expr * (located_pattern * located_expr option * located_expr) list
-  | Lam of located_pattern * located_expr
-  | Const of located_const
+  | Tuple of tm list
+  | Let of string * tm * tm * tm (* let p₁ ... pₙ : type = e₁ in e₂ *)
+  | Match of tm * (located_pattern * tm option * tm) list
+    (* match cond to 
+       | p₁ when x₁ => y₁
+       ...
+       | pₙ when xₙ => yₙ*)
+  | Lam of string * tm
+  | Const of const
   | TypeLit of prim
-  | Binding of ident * located_expr * bool (* (x : T) | {x : T} *)
-  | Pi of located_expr * located_expr
-  | Hole
+  | Pi of tm * tm
 
+(* values for NbE *)
+type env = val_ list
+and closure = env * tm (* local variables in lambdas *)
+
+and val_ =
+  | VLocal of lvl (* local variable as de bruijn level *)
+  | VLam of string * closure
+  | VTuple of val_ list
+  | VMatch of val_ * (located_pattern * val_ option * val_) list
+  | VPi of val_ * closure
+  | VAp of binder * val_ * val_
+  | VTypeLit of prim
+  | VConst of const
+
+(* top level extras *)
 type located_ty_decl = Location.t * ty_decl
-and ty_decl = ident * tdecl_type
+and ty_decl = string * tdecl_type
 
 and tdecl_type =
-  | Alias of located_expr
-  | Variant of located_expr * (ident * located_expr) list
-  | Record of ident * located_expr * (ident * located_expr) list
+  | Alias of tm
+  | Variant of tm * (string * tm) list
+  | Record of string * tm * (string * tm) list
 
 type located_definition = Location.t * definition
+and definition = tm * string * tm option * tm
+(* type, identifer, optional when-block, body, optional with-block *)
 
-and definition =
-  | Dec of ident * located_expr
-  | Def of ident * located_expr option * located_expr * with_block
-(* identifer, optional when-block, body, optional with-block *)
+type program = string * located_import list * located_ty_decl list * located_definition list
 
-and with_block = located_definition list
+(* early declaration of val/tm for errors *)
+let rec pp_tm out (tm : tm) =
+  match tm with
+  | Local i -> Format.fprintf out "%d" i
+  | Const c -> pp_const out c
+  | TypeLit p -> pp_prim out p
+  | Ap (_, f, arg) -> Format.fprintf out "(%@ @[<hov>%a@ %a@])" pp_tm f pp_tm arg
+  | Tuple t ->
+      Format.fprintf out "(@[<hov>%a@])"
+        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_tm)
+        t
+  | Let (p, ty, v, n) ->
+      Format.fprintf out "@[<v>(@[<hov>%s@ %a@ %a@])@,%a@]" p pp_tm ty pp_tm v pp_tm n
+  | Lam (arg, body) -> Format.fprintf out "(la@[<v>m (%s)@,%a@])" arg pp_tm body
+  | Match (c, bs) ->
+      let pp_branch out (p, wb, b) =
+        Format.fprintf out "(wh@[<v>en %a@,(%a %a)@])"
+          Format.(pp_print_option ~none:(fun out () -> fprintf out "true") pp_tm)
+          wb pp_pattern p pp_tm b
+      in
+      Format.fprintf out "(ma@[<v>tch (%a)@,%a@])" pp_tm c
+        Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
+        bs
+  | Pi (l, r) -> Format.fprintf out "(-> %a %a)" pp_tm l pp_tm r
 
-type program =
-  ident * located_import list * located_ty_decl list * located_definition list
 
-(* pattern equality function to verify if two functions have the same type of arguments *)
-let rec equal_pattern ((_, l) : located_pattern) ((_, r) : located_pattern) : bool =
-  match l, r with
-  | PWild, _ -> true
-  | _, PWild -> true
-  | PConst (_, l), PConst (_, r) ->
-    (match l, r with
-     | Int l, Int r -> l = r
-     | Float l, Float r -> l = r
-     | String l, String r -> l = r
-     | Char l, Char r -> l = r
-     | Bool l, Bool r -> l = r
-     | Unit, Unit -> true
-     | Udc l, Udc r -> get_str_combine l = get_str_combine r
-     | Ident _, _ -> true
-     | _, Ident _ -> true
-     | _ -> false)
-  (*TODO: find a way to do this *)
-  (* | PCons (_, _), PConst (_, Udc (Str "[]")) -> true *)
-  (* | PConst (_, Udc (Str "[]")), PCons (_, _) -> true *)
-  | PBop (ll, lop, lr), PBop (rl, rop, rr) when get_str_combine lop = get_str_combine rop
-    -> equal_pattern ll lr && equal_pattern rl rr
-  | PCtor (li, lps), PCtor (ri, rps)
-    when List.length lps = List.length rps && get_str_combine li = get_str_combine ri ->
-    List.for_all2 equal_pattern lps rps
-  | PTuple l, PTuple r when List.length l = List.length r ->
-    List.for_all2 equal_pattern l r
-  | _ -> false
+let rec pp_val out (v : val_) =
+  match v with
+  | VLocal l -> Format.fprintf out "local_%d" l
+  | VLam (p, cl) -> Format.fprintf out "(la@[<v>m (%s)@,%a@])" p pp_closure cl
+  | VTuple vs ->
+      Format.fprintf out "(%a)"
+        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_val)
+        vs
+  | VMatch (c, bs) ->
+      let pp_branch out (p, wb, b) =
+        Format.fprintf out "(wh@[<v>en %a@,(%a %a)@])"
+          Format.(pp_print_option ~none:(fun out () -> fprintf out "true") pp_val)
+          wb pp_pattern p pp_val b
+      in
+      Format.fprintf out "(ma@[<v>tch (%a)@,%a@])" pp_val c
+        Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
+        bs
+  | VPi (l, cl) -> Format.fprintf out "(-> %a %a)" pp_val l pp_closure cl
+  | VAp (_, l, r) -> Format.fprintf out "(%@ %a %a)" pp_val l pp_val r
+  | VTypeLit p -> pp_prim out p
+  | VConst c -> pp_const out c
 
-and ( $= ) l r = equal_pattern l r
 
-(* record constructor and fields in order *)
-type record_info = ident * ident list
+and pp_closure out ((_, tm) : closure) = pp_tm out tm
 
-(* desugaring *)
-let fresh_pattern_ident =
-  let i = ref (-1) in
-  fun () ->
-    incr i;
-    GStr ("__match__", !i)
-;;
+(* evaluate a term to a value *)
+let rec to_val (env : env) : tm -> val_ = function
+  | Local i -> List.nth env i (*NOTE: shouldn't fail unless code is buggy *)
+  | TypeLit p -> VTypeLit p
+  | Const c -> VConst c
+  | Tuple ts -> VTuple (List.map (to_val env) ts)
+  | Lam (p, t) -> VLam (p, (env, t))
+  | Pi (l, r) -> VPi (to_val env l, (env, r))
+  | Ap (b, l, r) -> (
+      match (to_val env l, to_val env r) with
+      | VLam (_, cl), r -> cl $$ r (* β-reduction *)
+      | l, r -> VAp (b, l, r))
+  | Match (c, bs) ->
+      let c = to_val env c in
+      let bs =
+        List.map (fun (p, wb, b) -> (p, Base.Option.map ~f:(to_val env) wb, to_val env b)) bs
+      in
+      VMatch (c, bs)
+  | Let (_, _, v, n) ->
+      let inner = to_val env v in
+      to_val (inner :: env) n
 
-let rec desugar_pat ((loc, e) : Ast.located_pattern) : located_pattern =
-  match e with
-  | Ast.PWild -> loc, PWild
-  | Ast.PConst c -> loc, PConst c
-  | Ast.PBop (l, op, r) ->
-    let l = desugar_pat l in
-    let r = desugar_pat r in
-    loc, PBop (l, op, r)
-  | Ast.PCtor (i, ps) ->
-    let ps = List.map desugar_pat ps in
-    loc, PCtor (i, ps)
-  | Ast.PList ps ->
-    List.fold_right
-      (fun n acc ->
-         let n = desugar_pat n in
-         loc, PBop (n, Str "::", acc))
-      ps
-      (loc, PConst (loc, Udc (Str "[]")))
-  | Ast.PTuple ps -> loc, PTuple (List.map desugar_pat ps)
-;;
 
-(* desugar a given surface syntax construct to its core grammar equivalent *)
-let rec desugar_expr ((loc, e) : Ast.located_expr) (ri : record_info list) : located_expr =
-  let desugar_abs l r cons =
-    let l = desugar_expr l ri in
-    let r = desugar_expr r ri in
-    cons l r
-  in
-  match e with
-  | Ast.Hole -> loc, Hole
-  | Ast.Const c -> loc, Const c
-  | Ast.TypeLit t -> loc, TypeLit t
-  | Ast.Binding (i, e, is_imp) -> loc, Binding (i, desugar_expr e ri, is_imp)
-  | Ast.Bop (l, op, r) ->
-    (* x + y ==> (+) x y *)
-    let l = desugar_expr l ri in
-    let r = desugar_expr r ri in
-    let op = loc, Const (loc, Ident op) in
-    loc, Ap (0, (loc, Ap (0, op, l)), r)
-  | Ast.Ap (b, l, r) -> desugar_abs l r (fun l r -> loc, Ap (b, l, r))
-  | Ast.Pi (l, r) -> desugar_abs l r (fun l r -> loc, Pi (l, r))
-  | Ast.List es ->
-    (* [ x₁; ...; xₙ ] ==> x₁ :: ... :: xₙ :: [] *)
-    List.fold_right
-      (fun n acc ->
-         let n = desugar_expr n ri in
-         loc, Bop (n, Cons, acc))
-      es
-      (loc, Const (loc, Udc (Str "[]")))
-  | Ast.Tuple es -> loc, Tuple (List.map (flip desugar_expr ri) es)
-  | Ast.Let (p, t, e, n) ->
-    let p = desugar_pat p in
-    let t = Base.Option.map ~f:(flip desugar_expr ri) t in
-    let e = desugar_expr e ri in
-    let n = desugar_expr n ri in
-    loc, Let (p, t, e, n)
-  | Ast.If (c, t, f) ->
-    (* if statements are converted into 1/2 branch match statements *)
-    let c = desugar_expr c ri in
-    let t = desugar_expr t ri in
-    let branches =
-      let f = desugar_expr f ri in
-      let tp = loc, PConst (loc, Bool true) in
-      let fp = loc, PConst (loc, Bool false) in
-      [ tp, None, t; fp, None, f ]
-    in
-    loc, Match (c, branches)
-  | Ast.Match (c, branches) ->
-    let c = desugar_expr c ri in
-    let branches =
-      List.map
-        (fun (cond, wb, b) ->
-           ( desugar_pat cond
-           , Base.Option.map ~f:(flip desugar_expr ri) wb
-           , desugar_expr b ri ))
-        branches
-    in
-    loc, Match (c, branches)
-  | Ast.Lam (ps, b) ->
-    let b = desugar_expr b ri in
-    (match ps with
-     | [] ->
-       raise (Error.InternalError "Internal error - no arguments to a lambda function.")
-     | ps ->
-       (* fun x y => x ==> fun x => fun y => x *)
-       List.fold_left
-         (fun acc n ->
-            let n = desugar_pat n in
-            loc, Lam (n, acc))
-         b
-         (List.rev ps))
-  | Ast.RCons (i, fields) ->
-    (* cons { x₁ = y₁; ...; xₙ = yₙ }  ==> cons y₁ .. yₙ *)
-    (* we pick the record fields from the info list to get the correctly ordered fields *)
-    let ofields =
-      match List.assoc_opt i ri with
-      | Some r -> r
-      | None ->
-        Error.report_err
-          (Some loc, Printf.sprintf "Undefined record constructor - '%s'." (get_str i))
-    in
-    let desugared_fields =
-      List.map
-        (fun i ->
-           match List.assoc_opt i fields with
-           | Some e -> desugar_expr e ri
-           | None ->
-             Error.report_err
-               (Some loc, Printf.sprintf "Uninitialised record field - '%s'." (get_str i)))
-        ofields
-    in
-    List.fold_left
-      (fun acc e -> loc, Ap (0, acc, e))
-      (loc, Const (loc, Udc i))
-      desugared_fields
-  | Ast.RUpdate (i, existing_i, fields) ->
-    (* { x where y₁ = z₁; ...; yₙ = zₙ } ==> cons z₁ ... zₙ ; any missing fields are filled in with x.yₙ *)
-    let ofields =
-      match List.assoc_opt i ri with
-      | Some r -> r
-      | None ->
-        Error.report_err
-          (Some loc, Printf.sprintf "Undefined record constructor - '%s'." (get_str i))
-    in
-    let desugared_fields =
-      List.map
-        (fun i ->
-           match List.assoc_opt i fields with
-           | Some e -> desugar_expr e ri
-           | None ->
-             let existing_id =
-               get_str_combine existing_i :: String.split_on_char '.' (get_str_combine i)
-             in
-             loc, Const (loc, AccessIdent (List.map (fun i -> Str i) existing_id)))
-        ofields
-    in
-    List.fold_left
-      (fun acc n -> loc, Ap (0, acc, n))
-      (loc, Const (loc, Udc i))
-      desugared_fields
-;;
+(* applies a closure to a value and evaluates it *)
+and ( $$ ) ((env, t) : closure) (v : val_) : val_ = to_val (v :: env) t
 
-let desugar_ty_decl ((loc, (i, decl)) : Ast.located_ty_decl) (ri : record_info list)
-  : located_ty_decl
-  =
-  let desugar_assoc ts ri = List.map (fun (i, e) -> i, desugar_expr e ri) ts in
-  match decl with
-  | Ast.Alias t -> loc, (i, Alias (desugar_expr t ri))
-  | Ast.Variant (tsig, ts) -> loc, (i, Variant (desugar_expr tsig ri, desugar_assoc ts ri))
-  | Ast.Record (cons, tsig, ts) ->
-    loc, (i, Record (cons, desugar_expr tsig ri, desugar_assoc ts ri))
-;;
+(* db level -> db index *)
+let to_ix (l : lvl) (r : lvl) = l - r - 1
 
-let rec desugar_def ((loc, d) : Ast.located_definition) (ri : record_info list)
-  : located_definition
-  =
-  match d with
-  | Ast.Dec (i, e) -> loc, Dec (i, desugar_expr e ri)
-  | Ast.Def (i, args, when_block, b, with_block) ->
-    let when_block = Base.Option.map ~f:(flip desugar_expr ri) when_block in
-    let b = 
-      let b = desugar_expr b ri in
-      List.fold_left
-        (fun acc n ->
-          let n = desugar_pat n in
-          loc, Lam (n, acc))
-        b
-        (List.rev args)
-    in
-    let with_block = List.map (flip desugar_def ri) with_block in
-    loc, Def (i, when_block, b, with_block)
+let rec quote (lvl : lvl) : val_ -> tm = function
+  | VLocal l -> Local (to_ix lvl l)
+  | VTypeLit t -> TypeLit t
+  | VConst c -> Const c
+  | VTuple vs -> Tuple (List.map (quote lvl) vs)
+  | VAp (b, l, r) -> Ap (b, quote lvl l, quote lvl r)
+  | VMatch (c, bs) ->
+      let c = quote lvl c in
+      let bs =
+        List.map (fun (p, wb, b) -> (p, Base.Option.map ~f:(quote lvl) wb, quote lvl b)) bs
+      in
+      Match (c, bs)
+  | VLam (p, cl) ->
+      (* increment the level as we move into the closure *)
+      (* add a local with the current level to capture the current argument *)
+      Lam (p, quote (lvl + 1) (cl $$ VLocal lvl))
+  | VPi (l, cl) ->
+      let l = quote lvl l in
+      let r = quote (lvl + 1) (cl $$ VLocal lvl) in
+      Pi (l, r)
+
 
 (*
-    dec map : (a, b : Type) -> (a -> b) -> List a -> List b
-    def map _ _ _ [] := []
-    def map a b f (x :: xs) := f x :: map a b f xs
+  checks if a value can be converted into another, essentially is equality.
+  carries out β/η conversion.
+ *)
+let rec conv (lvl : lvl) (l : val_) (r : val_) : bool =
+  match (l, r) with
+  | VLocal l, VLocal r -> l = r
+  | VTypeLit l, VTypeLit r -> l#=r
+  | VConst l, VConst r -> l %= r
+  | VAp (_, l, r), VAp (_, l', r') -> conv lvl l l' && conv lvl r r'
+  | VPi (ll, lc), VPi (rl, rc) ->
+      (* go into the closure and check that the bound variables are equal *)
+      conv lvl ll rl && conv (lvl + 1) (lc $$ VLocal lvl) (rc $$ VLocal lvl)
+  | VLam (_, lc), VLam (_, rc) -> conv (lvl + 1) (lc $$ VLocal lvl) (rc $$ VLocal lvl)
+  (* (fun x -> M x) N => M N *)
+  | VLam (_, cl), r -> conv (lvl + 1) (cl $$ VLocal lvl) (VAp (0, r, VLocal lvl))
+  | l, VLam (_, cl) -> conv (lvl + 1) (VAp (0, l, VLocal lvl)) (cl $$ VLocal lvl)
+  | _ -> false
 
-                  ||
-                  \/
 
-    dec map : (a, b : Type) -> (a -> b) -> List a -> List b
-    def map :=
-      fun __match__1 ->
-      fun __match__2 ->
-      fun __match__3 ->
-      fun __match__4 ->
-      match (__match__1, __match__2, __match__3, __match__4) to
-      | (_, _, _, []) => []
-      | (a, b, f, x :: xs) => f x :: map a b f xs
-*)
-and desugar_flpm (loc, (i, when_block, body, wb)) (defs : located_definition list) =
-  let rec gather_args (_, e) acc =
-    match e with
-    | Lam (a, e) -> gather_args e (a :: acc)
-    | _ -> List.rev acc
-  in
-  let rec get_body = function
-    | _, Lam (_, e) -> get_body e
-    | e -> e
-  in
-  let args = gather_args body [] in
-  let defs', matches =
-    let rec group_defs ds failed_acc acc =
-      match ds with
-      | ((_, Dec _) as d) :: ds -> group_defs ds (d :: failed_acc) acc
-      | ((loc, Def (i', wb, b, wb')) as failed) :: ds ->
-        (* if the functions have the same identifier and argument count, we check that their patterns match. *)
-        (* any successful matches are removed from the definition list so that they aren't checked again. *)
-        let args' = gather_args b [] in
-        let success = loc, args', (i', wb, get_body b, wb') in
-        let equal_i = get_str_combine i = get_str_combine i' in
-        let equal_arg_c = List.length args = List.length args' in
-        if equal_i && equal_arg_c && List.for_all2 ( $= ) args args
-        then group_defs ds failed_acc (success :: acc)
-        else group_defs ds (failed :: failed_acc) acc
-      | [] -> failed_acc, acc
-    in
-    group_defs defs [] []
-  in
-  let defs' = List.rev defs' in
-  match matches with
-  | [] -> (loc, Def (i, when_block, body, wb)), defs
+(* type checking *)
+type 'a result = 'a Base.Or_error.t
+
+let ( let* ) = Base.Or_error.( >>= )
+let ( let@ ) = Base.Or_error.( >>| )
+let combine_errors = Base.Or_error.combine_errors
+
+(* constructor, overall type, field name & type *)
+type record_info = string * Ast.located_expr * (string * val_) list
+type ty = string * val_
+type ctx = { env : env; tys : ty list; records : record_info list; lvl : lvl }
+
+let empty_ctx () = { env = []; tys = []; records = []; lvl = 0 }
+
+let bind_var ~(id : string) ~(t : val_) (ctx : ctx) =
+  { ctx with env = VLocal ctx.lvl :: ctx.env; tys = (id, t) :: ctx.tys; lvl = ctx.lvl + 1 }
+
+
+let define_var ~(id : string) ~(v : val_) ~(t : val_) (ctx : ctx) =
+  { ctx with env = v :: ctx.env; tys = (id, t) :: ctx.tys; lvl = ctx.lvl + 1 }
+
+
+let make_err (e : Error.t) : 'a result = Base.Or_error.error_string @@ Error.format_err e
+let ok (v : 'a) : 'a result = Ok v
+
+let fresh : string -> string =
+  let i = ref (-1) in
+  fun s ->
+    incr i;
+    s ^ string_of_int !i
+
+
+let replace_pattern ((_, p) : located_pattern) ((loc, _) as b : Ast.located_expr) :
+    string * Ast.located_expr =
+  match p with
+  | PVar i -> (i, b)
   | _ ->
-    let match_idents = List.map (fun _ -> loc, Ident (fresh_pattern_ident ())) args in
-    let new_body, with_block =
-      let rec construct_branches ds branch_acc wb_acc =
-        (* f x₁ .. xₙ : ... = ... ==> | (x₁, .., xₙ) when ... => ... *)
-        match ds with
-        | [] ->
-          let b = (loc, PTuple args), when_block, get_body body in
-          b :: branch_acc, List.flatten (wb :: wb_acc)
-        | (_, args, (_, when_block, b, with_block)) :: ds ->
-          let branch = (loc, PTuple args), when_block, b in
-          construct_branches ds (branch :: branch_acc) (with_block :: wb_acc)
-        (* with_blocks are preserved to prevent any undefined variable errors *)
+      (* we create a match expr to remove the pattern from the expression *)
+      let i = fresh "?p" in
+      let match_ =
+        let c = (loc, Ast.Var (Ident i)) in
+        let branch = [ ((loc, p), None, b) ] in
+        (loc, Ast.Match (c, branch))
       in
-      let c = loc, Tuple (List.map (fun i -> loc, Const i) match_idents) in
-      let branches, wb = construct_branches matches [] [] in
-      (loc, Match (c, branches)), wb
-    in
-    (* def map f (x :: xs) := ... ==> def map __match_0 __match_1 := ... *)
-    let new_def = loc, Def (i, when_block, new_body, with_block) in
-    new_def, defs'
-;;
+      (i, match_)
 
-let desugar_program ((i, imps, decls, defs) : Ast.program) : program =
-  let decls = List.map (flip desugar_ty_decl []) decls in
-  let ri : record_info list =
-    let rec go l acc =
-      match l with
-      | [] -> acc
-      | (_, (_, Record (i, _, fields))) :: t -> go t ((i, List.map fst fields) :: acc)
-      | _ :: t -> go t acc
-    in
-    go decls []
+
+let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result =
+  match (e, ex) with
+  | Ast.Lam (p, b), VPi (l, cl) ->
+      let i, b = replace_pattern p b in
+      let@ b = check (bind_var ~id:i ~t:l ctx) b (cl $$ VLocal ctx.lvl) in
+      Lam (i, b)
+  | Ast.Let (p, t, b, n), t' -> (
+      let i, b = replace_pattern p b in
+      match t with
+      | Some t ->
+          let* t = is_type ctx t in
+          (* check that it's actually a type *)
+          let vt = to_val ctx.env t in
+          let* b = check ctx b vt in
+          let@ n = check (define_var ~id:i ~v:(to_val ctx.env b) ~t:vt ctx) n t' in
+          Let (i, t, b, n)
+      | None ->
+          let* b, t = infer ctx b in
+          let@ n = check (define_var ~id:i ~v:(to_val ctx.env b) ~t ctx) n t' in
+          let t = quote ctx.lvl t in
+          Let (i, t, b, n))
+  | e, ex ->
+      let* e, t = infer ctx (loc, e) in
+      if conv ctx.lvl t ex then ok e
+      else
+        make_err
+          ( Some loc,
+            Format.asprintf "Ex@[<v>pected type %a@,but inferred type %a.@]" pp_val ex pp_val t )
+
+
+and is_type (ctx : ctx) (e : Ast.located_expr) : tm result = check ctx e (VTypeLit (PUni 0))
+
+and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
+  match e with
+  | Ast.Const c ->
+      let t =
+        match c with
+        | Int _ -> PInt
+        | Float _ -> PFloat
+        | String _ -> PString
+        | Char _ -> PChar
+        | Bool _ -> PBool
+        | Unit -> PUnit
+      in
+      ok @@ (Const c, VTypeLit t)
+  | Ast.Tuple es ->
+      let@ ets = List.map (infer ctx) es |> combine_errors in
+      let es, ts = List.split ets in
+      (Tuple es, VTuple ts)
+  | Ast.TypeLit p ->
+      let t = match p with PUni n -> PUni (n + 1) | _ -> PUni 0 in
+      ok @@ (TypeLit p, VTypeLit t)
+  | Ast.If (c, t, f) ->
+      let t = ((loc, PConst (Bool true)), None, t) in
+      let f = ((loc, PConst (Bool false)), None, f) in
+      let e = (loc, Ast.Match (c, [ t; f ])) in
+      infer ctx e
+  | Ast.Var i -> (
+      let i = get_str i in
+      let r = List.find_mapi (fun n (x, t) -> if x = i then Some (n, t) else None) ctx.tys in
+      match r with
+      | None -> make_err (Some loc, Printf.sprintf "Undefined identifier - '%s'." i)
+      | Some (n, t) -> ok @@ (Local n, t))
+  | Ast.Ap (b, l, r) -> (
+      (*TODO: recognise builtins. *)
+      let* l, l' = infer ctx l in
+      match l' with
+      | VPi (l', ret) ->
+          let@ r = check ctx r l' in
+          (Ap (b, l, r), ret $$ to_val ctx.env r)
+          (* β-reduction *)
+      | _ ->
+          make_err
+            (Some loc, Format.asprintf "Ex@[<v>pected a function type@,but inferred %a.@]" pp_val l')
+      )
+  | Ast.Pi (bind, l, r) -> (
+      let rec get_uni = function
+        | TypeLit (PUni n) -> n + 1
+        | TypeLit _ -> 0
+        | Pi (l, r) -> Int.max (get_uni l) (get_uni r)
+        | _ -> raise (Error.InternalError "Internal Error - `get_uni` called on non-type.")
+      in
+      let* l = is_type ctx l in
+      match bind with
+      | None ->
+          let* r = is_type ctx r in
+          let li, ri = (get_uni l, get_uni r) in
+          ok @@ (Pi (l, r), VTypeLit (PUni (Int.max li ri)))
+          (*NOTE: setting it to one here might be a bit weird *)
+      | Some (i, _) ->
+          (* ignoring the type of bind for now. *)
+          let l' = to_val ctx.env l in
+          let* r = is_type (bind_var ~id:i ~t:l' ctx) r in
+          let li, ri = (get_uni l, get_uni r) in
+          ok @@ (Pi (l, r), VTypeLit (PUni (Int.max li ri))))
+  | Ast.Let (p, t, b, n) -> (
+      let i, b = replace_pattern p b in
+      match t with
+      | Some t ->
+          let* t = is_type ctx t in
+          (* check that it's actually a type *)
+          let vt = to_val ctx.env t in
+          let* b = check ctx b vt in
+          let@ n, ty = infer (define_var ~id:i ~v:(to_val ctx.env b) ~t:vt ctx) n in
+          (Let (i, t, b, n), ty)
+      | None ->
+          let* b, t = infer ctx b in
+          let@ n, ty = infer (define_var ~id:i ~v:(to_val ctx.env b) ~t ctx) n in
+          let t = quote ctx.lvl t in
+          (Let (i, t, b, n), ty))
+  | Ast.Match (c, bs) ->
+      (*TODO: check that the type of the pattern matches the type of the condition *)
+      let* c, _ = infer ctx c in
+      let check_branch (p, wb, ((loc, _) as b)) =
+        let* wb =
+          match wb with
+          | None -> ok None
+          | Some wb ->
+              let@ wb = check ctx wb (VTypeLit PBool) in
+              Some wb
+        in
+        let@ b, t = infer ctx b in
+        (loc, ((p, wb, b), t))
+      in
+      let@ bs, t =
+        let* bs = List.map check_branch bs |> combine_errors in
+        let ex = List.hd bs |> snd |> snd in
+        let@ _ =
+          List.filter_map
+            (fun (loc, (_, t)) ->
+              (* if the inferred type is equal, then it's fine *)
+              if conv ctx.lvl ex t then None
+              else
+                Some
+                  (make_err
+                     ( Some loc,
+                       Format.asprintf "Ex@[<v>pected type %a@,but got %a.@]" pp_val ex pp_val t )))
+            bs
+          |> combine_errors
+        in
+        (List.map (fun v -> snd v |> fst) bs, ex)
+      in
+      (Match (c, bs), t)
+  | Ast.RCons (cons, fs) -> (
+      match List.find_opt (fun (c, _, _) -> cons = c) ctx.records with
+      | None -> make_err (Some loc, Printf.sprintf "Undefined record constructor - '%s'." cons)
+      | Some (_, overall_t, ex_fs) ->
+          (* recurses rightward into the type to get the return type *)
+          let rec get_t = function Ap (_, _, r) -> get_t r | v -> v in
+          let g = List.length fs in
+          let e = List.length ex_fs in
+          if g <> e then
+            make_err
+              ( Some loc,
+                Format.asprintf
+                  "In@[<v>correct amount of record fields.@,\
+                   Expected %d field(s).@,\
+                   Got %d field(s).@]"
+                  g e )
+          else
+            let* fs =
+              (*
+             we map over the expected fields, using them to pull the value from the given fields.
+             this also ensures that the fields are in the correct order.
+          *)
+              List.map
+                (fun (ex_i, ex_t) ->
+                  match List.assoc_opt ex_i fs with
+                  | None ->
+                      make_err (Some loc, Printf.sprintf "Uninitialised record field - '%s'." ex_i)
+                  | Some got -> check ctx got ex_t)
+                ex_fs
+              |> combine_errors
+            in
+            let@ ret =
+              let@ r = is_type ctx overall_t in
+              get_t r |> to_val ctx.env
+            in
+            (* cons { x₁ = y₁; ...; xₙ = yₙ }  ==> cons y₁ .. yₙ *)
+            let cons = List.fold_left (fun n acc -> Ap (0, n, acc)) (List.hd fs) (List.tl fs) in
+            (cons, ret))
+  | e -> Error.todo (Format.asprintf "finish infer - %a" Ast.pp_expr (Location.dummy_loc, e))
+
+
+let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
+    (located_definition list * ctx) result =
+  (*
+    we go through and typecheck each local definition.
+    we first try to find any declared type signatures.
+  *)
+  let* locals, ctx =
+    match locals with
+    | [] -> ok ([], ctx)
+    | _ ->
+        let* ctx =
+          let@ ds =
+            List.filter_map (function _, Ast.Dec (i, sig_) -> Some (i, sig_) | _ -> None) locals
+            |> List.map (fun (i, sig_) ->
+                let@ sig_ = is_type ctx sig_ in
+                (i, sig_))
+            |> combine_errors
+          in
+          List.fold_left (fun ctx (i, sig_) -> bind_var ~id:i ~t:(to_val ctx.env sig_) ctx) ctx ds
+        in
+        let rec go ctx acc = function
+          | [] -> (List.rev acc, ctx)
+          | d :: ds -> (
+              match check_definition ctx d with
+              | Ok (d, ctx) -> go ctx (Ok d :: acc) ds
+              | Error _ as e -> go ctx (e :: acc) ds)
+        in
+        let r, ctx =
+          List.filter_map
+            (function
+              | loc, Ast.Def (i, args, wb, b, locals) -> Some (loc, (i, args, wb, b, locals))
+              | _ -> None)
+            locals
+          |> go ctx []
+        in
+        let@ locals = combine_errors r in
+        (List.flatten locals, ctx)
   in
-  let defs =
-    let defs = List.map (flip desugar_def ri) defs in
-    let rec without_matches ds acc =
-      match ds with
-      | [] -> acc
-      | ((_, Dec _) as d) :: ds -> without_matches ds (d :: acc)
-      | (loc, Def (i, when_block, body, with_block)) :: ds ->
-        let d, ds = desugar_flpm (loc, (i, when_block, body, with_block)) ds in
-        without_matches ds (d :: acc)
-    in
-    without_matches defs []
+  let* wb =
+    match wb with
+    | None -> ok None
+    | Some wb ->
+        let* wb = check ctx wb (VTypeLit PBool) in
+        ok @@ Some wb
   in
-  i, imps, decls, List.rev defs
-;;
+  (*
+    we replace any complex pattern (i.e. not just a variable) with a pattern identifier.
+    we then construct a match expression with the actual patterns
+  *)
+  let* b, t =
+    match args with
+    | [] -> infer ctx b
+    | [ p ] ->
+        let b = (loc, Ast.Lam (p, b)) in
+        infer ctx b
+    | ps ->
+        let match_ =
+          let c =
+            let is =
+              List.map
+                (fun (loc, p) ->
+                  match p with
+                  | PVar i -> (loc, Ast.Var (Ident i))
+                  | _ -> (loc, Ast.Var (Ident (fresh "?p"))))
+                ps
+            in
+            (loc, Ast.Tuple is)
+          in
+          let bs = [ ((loc, PTuple ps), None, b) ] in
+          (loc, Ast.Match (c, bs))
+        in
+        let b = List.fold_right (fun p acc -> (loc, Ast.Lam (p, acc))) ps match_ in
+        infer ctx b
+  in
+  match List.assoc_opt i ctx.tys with
+  | None ->
+      let b' = to_val ctx.env b in
+      let ctx = define_var ~id:i ~v:b' ~t ctx in
+      let t = quote ctx.lvl t in
+      let d = (loc, (t, i, wb, b)) in
+      ok @@ (d :: locals, ctx)
+  | Some t' ->
+      if not @@ conv ctx.lvl t' t then
+        make_err
+          ( Some loc,
+            Format.asprintf "Ex@[<v>pected type %a.@,But inferred type %a.@]" pp_val t' pp_val t )
+      else
+        let t = quote ctx.lvl t' in
+        let d = (loc, (t, i, wb, b)) in
+        ok @@ (d :: locals, ctx)
+
+
+let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
+  let ctx = empty_ctx () in
+  let* tdecls, ctx =
+    let rec check_decls ctx acc ts =
+      (* we check fields/variants in the form of string * Ast.located_expr. *)
+      let rec check_assoc ?(bind = false) ctx acc as_ : ctx * 'a result list =
+        match as_ with
+        | [] -> (ctx, List.rev acc)
+        | (n, t) :: as_ -> (
+            match is_type ctx t with
+            | Error _ as e -> check_assoc ctx (e :: acc) as_
+            | Ok t when bind ->
+                let t' = to_val ctx.env t in
+                let ctx = bind_var ~id:n ~t:t' ctx in
+                check_assoc ctx (Ok (n, t) :: acc) as_
+            | Ok t -> check_assoc ctx (Ok (n, t) :: acc) as_)
+      in
+      match ts with
+      | [] -> (ctx, List.rev acc)
+      | (loc, (n, Ast.Alias t)) :: ts -> (
+          match is_type ctx t with
+          | Error _ as e -> check_decls ctx (e :: acc) ts
+          | Ok t ->
+              let a = (loc, (n, Alias t)) in
+              let t = to_val ctx.env t in
+              check_decls (bind_var ~id:n ~t ctx) (Ok a :: acc) ts)
+      | (loc, (n, Ast.Variant (sig_, vs))) :: ts -> (
+          let sig_ = is_type ctx sig_ in
+          (* we bind variants so that they become 'functions' *)
+          let ctx, vs = check_assoc ~bind:true ctx [] vs in
+          match (sig_, combine_errors vs) with
+          | (Error _ as e1), (Error _ as e2) -> check_decls ctx (e1 :: e2 :: acc) ts
+          | (Error _ as e), _ | _, (Error _ as e) -> check_decls ctx (e :: acc) ts
+          | Ok sig_, Ok vs ->
+              let v = (loc, (n, Variant (sig_, vs))) in
+              let sig_' = to_val ctx.env sig_ in
+              check_decls (bind_var ~id:n ~t:sig_' ctx) (Ok v :: acc) ts)
+      | (loc, (n, Ast.Record (cons, sig_'', fs))) :: ts -> (
+          let sig_ = is_type ctx sig_'' in
+          let ctx, fs = check_assoc ctx [] fs in
+          match (sig_, combine_errors fs) with
+          | (Error _ as e1), (Error _ as e2) -> check_decls ctx (e1 :: e2 :: acc) ts
+          | (Error _ as e), _ | _, (Error _ as e) -> check_decls ctx (e :: acc) ts
+          | Ok sig_, Ok fs ->
+              let r = (loc, (n, Record (cons, sig_, fs))) in
+              let sig_' = to_val ctx.env sig_ in
+              let ctx =
+                (* we hold the record information for checking Ast.RCons and Ast.RUpdate *)
+                let ctx = bind_var ~id:n ~t:sig_' ctx in
+                let fs = List.map (fun (i, t) -> (i, to_val ctx.env t)) fs in
+                { ctx with records = (cons, sig_'', fs) :: ctx.records }
+              in
+              check_decls ctx (Ok r :: acc) ts)
+    in
+    let ctx, tdecls = check_decls ctx [] tdecls in
+    let@ tdecls = combine_errors tdecls in
+    (tdecls, ctx)
+  in
+  let* ctx =
+    let rec go ctx = function
+      | [] -> Ok ctx
+      | (i, t) :: ts ->
+          let* t = is_type ctx t in
+          let t = to_val ctx.env t in
+          go (bind_var ~id:i ~t ctx) ts
+    in
+    let decs = List.filter_map (function _, Ast.Dec (i, t) -> Some (i, t) | _ -> None) defs in
+    go ctx decs
+  in
+  let@ defs =
+    let defs =
+      List.filter_map
+        (function
+          | loc, Ast.Def (i, as_, wb, b, wb') -> Some (loc, (i, as_, wb, b, wb')) | _ -> None)
+        defs
+    in
+    let rec go ctx acc = function
+      | [] -> acc
+      | d :: ds -> (
+          match check_definition ctx d with
+          | Error _ as e -> go ctx (e :: acc) ds
+          | Ok (d, ctx) -> go ctx (Ok d :: acc) ds)
+    in
+    go ctx [] defs |> combine_errors
+  in
+  (n, mods, tdecls, List.flatten defs)
+
 
 (* pretty printing *)
-let rec pp_pattern out ((_, arg) : located_pattern) =
-  match arg with
-  | PConst c -> pp_const out c
-  | PWild -> Format.fprintf out "_"
-  | PBop (l, op, r) ->
-    Format.fprintf out "(%a @[<hov>%a %a@])" pp_ident op pp_pattern l pp_pattern r
-  | PCtor (i, v) ->
-    Format.fprintf
-      out
-      "(%a %a)"
-      pp_ident
-      i
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
-      v
-  | PTuple ps ->
-    Format.fprintf
-      out
-      "(@[<hov>%a@])"
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_pattern)
-      ps
-;;
-
-let rec pp_expr out ((_, e) : located_expr) =
-  match e with
-  | Const c -> pp_const out c
-  | Ap (_, f, arg) -> Format.fprintf out "(%@ @[<hov>%a@ %a@])" pp_expr f pp_expr arg
-  | Bop (l, op, r) ->
-    Format.fprintf out "(@[<hov>%a@ %a@ %a@])" pp_binop op pp_expr l pp_expr r
-  | Tuple t ->
-    Format.fprintf
-      out
-      "(@[<hov>%a@])"
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_expr)
-      t
-  | Let (p, ty, v, n) ->
-    Format.fprintf
-      out
-      "@[<v>(@[<hov>%a@ %a@ %a@])@,%a@]"
-      pp_pattern
-      p
-      Format.(pp_print_option ~none:(fun out () -> fprintf out "<none>") pp_expr)
-      ty
-      pp_expr
-      v
-      pp_expr
-      n
-  | Lam (arg, body) ->
-    Format.fprintf out "(la@[<v>m (%a) %a@])" pp_pattern arg pp_expr body
-  | Match (cond, bs) ->
-    let pp_branch out (p, wb, b) =
-      Format.fprintf
-        out
-        "(wh@[<v>en %a@,(%a %a)@])"
-        Format.(pp_print_option ~none:(fun out () -> fprintf out "true") pp_expr)
-        wb
-        pp_pattern
-        p
-        pp_expr
-        b
-    in
-    Format.fprintf
-      out
-      "(ma@[<v>tch (%a)@,%a@])"
-      pp_expr
-      cond
-      Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
-      bs
-  | Pi (l, r) -> Format.fprintf out "(%a -> %a)" pp_expr l pp_expr r
-  | Binding (i, e, is_imp) -> 
-    if is_imp
-    then Format.fprintf out "{ %a : %a }" pp_ident i pp_expr e
-    else Format.fprintf out "( %a : %a )" pp_ident i pp_expr e
-  | TypeLit p -> Format.fprintf out "%a" pp_prim p
-  | Hole -> Format.fprintf out "_"
-;;
-
 let rec pp_ty_decl out ((_, (i, t)) : located_ty_decl) =
   match t with
-  | Alias _ -> Format.fprintf out "(ty@[<v>pe %a %a@])" pp_ident i pp_tdecl_type t
-  | _ -> Format.fprintf out "(ty@[<v>pe %a@,%a@])" pp_ident i pp_tdecl_type t
+  | Alias _ -> Format.fprintf out "(ty@[<v>pe %s %a@])" i pp_tdecl_type t
+  | _ -> Format.fprintf out "(ty@[<v>pe %s@,%a@])" i pp_tdecl_type t
+
 
 and pp_tdecl_type out (t : tdecl_type) =
-  let pp_field out ((i, t) : ident * located_expr) =
-    Format.fprintf out "(%a %a)" pp_ident i pp_expr t
-  in
+  let pp_field out (i, t) = Format.fprintf out "(%s %a)" i pp_tm t in
   match t with
-  | Alias t -> pp_expr out t
+  | Alias t -> pp_tm out t
   | Record (cons, tsig, r) ->
-    Format.fprintf
-      out
-      "(re@[<v>cord %a { %a }@,%a@])"
-      pp_ident
-      cons
-      pp_expr
-      tsig
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@,") pp_field)
-      r
+      Format.fprintf out "(re@[<v>cord %s { %a }@,%a@])" cons pp_tm tsig
+        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@,") pp_field)
+        r
   | Variant (tsig, v) ->
-    Format.fprintf
-      out
-      "(va@[<v>riant { %a }@,%a@])"
-      pp_expr
-      tsig
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@,") pp_field)
-      v
-;;
+      Format.fprintf out "(va@[<v>riant { %a }@,%a@])" pp_tm tsig
+        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@,") pp_field)
+        v
 
-let pp_when_block out (when_block : located_expr option) =
-  Format.fprintf
-    out
-    "%a"
+
+let pp_when_block out (when_block : tm option) =
+  Format.fprintf out "%a"
     Format.(
       pp_print_option
         ~none:(fun out () -> fprintf out "()")
-        (fun out block -> fprintf out "(when @[<hov>%a@])" pp_expr block))
+        (fun out block -> fprintf out "(when @[<hov>%a@])" pp_tm block))
     when_block
-;;
 
-let rec pp_definition out ((_, def) : located_definition) =
-  match def with
-  | Dec (f, ts) -> Format.fprintf out "(dec %a @[<hov>%a@])" pp_ident f pp_expr ts
-  | Def (f, when_block, body, with_block) ->
-    Format.fprintf
-      out
-      "(de@[<v>f %a@,%a@,%a@,%a@])"
-      pp_ident
-      f
-      pp_when_block
-      when_block
-      pp_expr
-      body
-      pp_with_block
-      with_block
 
-and pp_with_block out (with_block : with_block) =
-  let block out () =
-    match with_block with
-    | [] -> Format.fprintf out "<none>"
-    | _ ->
-      Format.fprintf
-        out
-        "%a"
-        Format.(pp_print_list ~pp_sep:pp_print_cut pp_definition)
-        with_block
-  in
-  Format.fprintf out "(wi@[<v>th@,%a@])" block ()
-;;
+let pp_definition out ((_, (t, f, when_block, body)) : located_definition) =
+  Format.fprintf out "(de@[<v>f %s { %a }@,%a@,%a@])" f pp_tm t pp_when_block when_block pp_tm body
 
-let pp_module out (mod_name : ident) = Format.fprintf out "(module %a)" pp_ident mod_name
+
+let pp_module out (mod_name : string) = Format.fprintf out "(module %s)" mod_name
 
 let pp_program out ((prog_name, imports, types, body) : program) =
-  Format.fprintf
-    out
-    "%a@.@.%a@.@.%a@.@.%a@."
-    pp_module
-    prog_name
+  Format.fprintf out "%a@.@.%a@.@.%a@.@.%a@." pp_module prog_name
     Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@.") pp_import)
     imports
     Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@.") pp_ty_decl)
     types
     Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@.") pp_definition)
     body
-;;

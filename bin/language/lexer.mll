@@ -65,6 +65,7 @@
     (":=", ASSIGNMENT);
     ("=", EQ);
     ("=>", F_ARROW);
+    ("->", ARROW);
     ("@", ATSIGN);
     ("|", PIPE);
   ]
@@ -94,8 +95,7 @@ rule token = parse
   | '['         {with_pos lexbuf LBRACK}
   | ']'         {with_pos lexbuf RBRACK}
   | '|'         {with_pos lexbuf PIPE}
-  | '%'         {skip_comment lexbuf}
-  | "%{"        {skip_multiline_comment 0 lexbuf}
+  | "(*"        {skip_multiline_comment 0 lexbuf}
   | '`'         {with_pos lexbuf BTICK}
   | ':'         {with_pos lexbuf COLON}
   | ';'         {with_pos lexbuf SEMI}
@@ -149,16 +149,9 @@ and tokenize_string buf = parse
     let err = (Some (Location.of_lexbuf lexbuf), Printf.sprintf "Invalid string char: %c" c) in
     report_err err
   }
-and skip_comment = parse
-  | newline {next_line lexbuf; token lexbuf}
-  | _       {skip_comment lexbuf}
-  | eof     {
-    let err = (Some (Location.of_lexbuf lexbuf), "Unterminated comment.") in
-    report_err err
-  }
 and skip_multiline_comment nesting = parse
-  | "%{"    {skip_multiline_comment (nesting + 1) lexbuf}
-  | "%}"    {if nesting = 0 then (token lexbuf) else (skip_multiline_comment (nesting - 1) lexbuf)}
+  | "(*"    {skip_multiline_comment (nesting + 1) lexbuf}
+  | "*)"    {if nesting = 0 then (token lexbuf) else (skip_multiline_comment (nesting - 1) lexbuf)}
   | newline {next_line lexbuf; skip_multiline_comment nesting lexbuf}
   | _       {skip_multiline_comment nesting lexbuf}
   | eof     {

@@ -1,6 +1,6 @@
 module TypeClass
 
-class toInt : (a : Type) with
+class toInt : (a : Type) includes
   dec toInt : a -> Int
 end
 
@@ -16,7 +16,7 @@ class Monoid : Semigroup (a : Type) => a includes
   dec mempty : a
 end
 
-% numbers
+(* numbers *)
 union Nat : Type =
   | Z : Nat
   | S : Nat -> Nat
@@ -53,8 +53,8 @@ instance Monoid Nat where
   def mempty := Z
 end
 
-% lists
-union List : (a : Type) -> Type =
+(* lists *)
+union List : (a : Type) -> List a =
   | Nil : List a
   | ( :: ) : a -> List a -> List a
 

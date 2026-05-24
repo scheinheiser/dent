@@ -3,61 +3,43 @@ open Util
 type binder = int
 
 type ident =
-  | Str of string
-  | GStr of string * int
+  | Ident of string
+  | AccessIdent of string list
+  | Udc of string (* user defined costructor *)
 
-type located_const = Location.t * const
+type const = Int of int | Float of float | String of string | Char of char | Bool of bool | Unit
+type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni of int (* A : Type n *)
 
-and const =
-  | Int of int
-  | Float of float
-  | String of string
-  | Char of char
-  | Bool of bool
-  | Unit
-  | Ident of ident
-  | AccessIdent of ident list
-  | Udc of ident (* user defined costructor *)
+type located_pattern = Location.t * pattern
 
-type prim =
-  | PInt
-  | PFloat
-  | PString
-  | PChar
-  | PBool
-  | PUnit
-  | PUni of int (* A : Type n *)
-
-type binop =
-  | IAdd | FAdd
-  | IMul | FMul
-  | ISub | FSub
-  | IDiv | FDiv
-  | Less
-  | Greater
-  | LessE
-  | GreaterE
-  | Equal
-  | NotEq
-  | And
-  | Or
-  | Cons
-  | User_op of ident
-[@@ocamlformat "disable"]
+and pattern =
+  | PWild (* _ *)
+  | PConst of const
+  | PVar of string
+  | PBop of located_pattern * string * located_pattern
+  | PCtor of string * located_pattern list
+  | PTuple of located_pattern list
 
 type located_import = Location.t * import
 and import = ident * import_cond option
+and import_cond = CWith of ident list | CWithout of ident list
 
-and import_cond =
-  | CWith of ident list
-  | CWithout of ident list
+(* const *)
+val const_equality : const -> const -> bool
+val ( %= ) : const -> const -> bool
 
+(* prims *)
+val prim_equality : prim -> prim -> bool
+val ( #= ) : prim -> prim -> bool
 val show_prim : prim -> string
+
+(* idents *)
 val get_str : ident -> string
-val get_str_combine : ident -> string
+
+(* pretty printing *)
 val pp_ident : Format.formatter -> ident -> unit
 val pp_prim : Format.formatter -> prim -> unit
-val pp_const : Format.formatter -> located_const -> unit
-val pp_binop : Format.formatter -> binop -> unit
+val pp_const : Format.formatter -> const -> unit
+val pp_pattern : Format.formatter -> located_pattern -> unit
 val pp_import_cond : Format.formatter -> import_cond -> unit
 val pp_import : Format.formatter -> located_import -> unit

@@ -13,8 +13,9 @@
 
 ## Elaborator
 - [ ] Get basic elaboration working (no holes/solving holes, no implicit arguments).
-  - [ ] Add de bruijn indices for bound variables.
-  - [ ] Add de bruijn levels for values.
-  - [ ] Add closures for lambdas (contains locally bound variables).
+  - [x] Typecheck basic type-level programming.
+  - [ ] Typecheck functions with arguments
+  - [ ] Properly typecheck match cases (compare patterns to condition type/whatever).
+  - [ ] Make sure that aliases, unions and records actually work.
 - [ ] Add meta variables and solving of them to allow for inference of typed holes.
 - [ ] Make implicit arguments work properly.

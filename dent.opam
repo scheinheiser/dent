@@ -5,9 +5,9 @@ description: ""
 maintainer: ["scheinheiser"]
 authors: ["scheinheiser"]
 license: "LICENSE"
-homepage: "https://github.com/scheinheiser/zap"
-doc: "https://github.com/scheinheiser/zap"
-bug-reports: "https://github.com/scheinheiser/zap/issues"
+homepage: "https://github.com/scheinheiser/dent"
+doc: "https://github.com/scheinheiser/dent"
+bug-reports: "https://github.com/scheinheiser/dent/issues"
 depends: [
   "dune" {>= "3.19"}
   "ocaml"
@@ -27,5 +27,5 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/scheinheiser/zap.git"
+dev-repo: "git+https://github.com/scheinheiser/dent.git"
 x-maintenance-intent: ["(latest)"]

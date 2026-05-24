@@ -1,6 +1,6 @@
-@module FLPMTest
+module FLPMTest
 
-@union List : (a: Type) -> Type =
+union List : (a: Type) -> List a =
   | Nil    : List a
   | ( :: ) : a -> List a -> List a
 @rassoc 7 ::

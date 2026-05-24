@@ -1,33 +1,29 @@
 module Implicits
 
-union List : (a: Type) -> Type =
-  | Nil    : List a
-  | ( :: ) : a -> List a -> List a
-@rassoc 7 ::
-
-% a version of `id` where you need to pass the type in
+(* a version of `id` where you need to pass the type in *)
 dec id_ : ( a : Type ) -> a -> a
 def id_ _ x := x
 
-% a version of id where you don't need to do that; the compiler fills it in.
+(* a version of id where you don't need to do that; the compiler fills it in. *)
 dec id : { a : Type } -> a -> a
 def id x := x
-%{
+
+(*
 take the application of id to a value:
 id "hello world"
 
 this means that "hello world" would be checked against the left type of the arrow, {a : Type}.
 in this case, I'd be able to safely bind the type of "hello world" to a and check the rest of the arrow
-%}
+*)
 
 dec const : {a : Type} -> {b : Type} -> a -> b -> a
 def const x _ := x
 
-%{
+(*
 applying this to a value like this:
 const 20 "bing" ==> (const 20) bing
 
 const ==> {a : Type} -> {b : Type} -> a -> b -> a
 
 20's type of Int would be checked against {a : Type}, and substituted in the rest of the type.
-%}
+*)

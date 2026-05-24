@@ -1,0 +1,15 @@
+module TcTest
+
+dec ( + ) : Int -> Int -> Int
+
+dec chooseType : Type
+def chooseType := 
+  if true 
+  then String
+  else Int
+
+dec val : Int
+def val := 
+  let five := 5 in
+  let ten := 10 in 
+  five + ten
