@@ -230,12 +230,12 @@ module Parser = struct
     | OP op -> (
         match List.assoc_opt op builtin_ops with
         | Some (p, _) -> p
-        | None -> ( match OM.find_opt op om with Some (n, _) -> n | None -> 8))
+        | None -> ( match OM.find_opt op om with Some (n, _) -> n | None -> 9))
     | UPPER_IDENT _ | IDENT _ | DOT_SEP_IDENT _ | INT _ | TY_INT | FLOAT _ | TY_FLOAT | CHAR _
     | TY_CHAR | STRING _ | TY_STRING | BOOL _ | TY_BOOL | UNIT | TY_UNIT ->
-        9 (* for function application *)
-    | EOF -> -1
-    | _ -> 0
+        10 (* for function application *)
+    | EOF -> -2
+    | _ -> -1
 
 
   (* returns operator precedence, accounting for fixity/associativity *)

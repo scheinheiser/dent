@@ -1,10 +1,15 @@
 module TypeExample
 
-union Pair : (a, b: Type) -> Pair a b = 
-  Cross : a -> b -> Pair a b
+alias Status := Bool
 
-dec fst : Pair a b -> a
-def fst (Cross x _) := x
+union Pair : (a, b: Type) -> Type = 
+  Cross : (a, b: Type) -> Pair a b
 
-dec snd : Pair a b -> b
-def snd (Cross _ y) := y
+dec status : Status
+def status := true
+
+dec fst : (a, b : Type) -> Pair a b -> a
+def fst _ _ (Cross x _) := x
+
+dec snd : (a, b : Type) -> Pair a b -> b
+def snd _ _ (Cross _ y) := y

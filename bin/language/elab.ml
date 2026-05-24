@@ -182,6 +182,12 @@ type 'a result = 'a Base.Or_error.t
 
 let ( let* ) = Base.Or_error.( >>= )
 let ( let@ ) = Base.Or_error.( >>| )
+
+let ( <|> ) l r ctx =
+  match l ctx with
+  | Ok _ as v -> v
+  | Error _ -> r ctx
+
 let combine_errors = Base.Or_error.combine_errors
 
 (* constructor, overall type, field name & type *)
@@ -254,8 +260,6 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result 
             Format.asprintf "Ex@[<v>pected type %a@,but inferred type %a.@]" pp_val ex pp_val t )
 
 
-and is_type (ctx : ctx) (e : Ast.located_expr) : tm result = check ctx e (VTypeLit PUni)
-
 and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   match e with
   | Ast.Const c ->
@@ -303,7 +307,6 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
       | None ->
           let* r = is_type ctx r in
           ok @@ (Pi (l, r), VTypeLit PUni)
-          (*NOTE: setting it to one here might be a bit weird *)
       | Some (i, _) ->
           (* ignoring the type of bind for now. *)
           let l' = to_val ctx.env l in
@@ -376,9 +379,9 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
           else
             let* fs =
               (*
-             we map over the expected fields, using them to pull the value from the given fields.
-             this also ensures that the fields are in the correct order.
-          *)
+                we map over the expected fields, using them to pull the value from the given fields.
+                this also ensures that the fields are in the correct order.
+              *)
               List.map
                 (fun (ex_i, ex_t) ->
                   match List.assoc_opt ex_i fs with
@@ -396,6 +399,15 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
             let cons = List.fold_left (fun n acc -> Ap (0, n, acc)) (List.hd fs) (List.tl fs) in
             (cons, ret))
   | e -> Error.todo (Format.asprintf "finish infer - %a" Ast.pp_expr (Location.dummy_loc, e))
+
+and is_type (ctx : ctx) (e : Ast.located_expr) : tm result = 
+  ((fun ctx -> check ctx e (VTypeLit PUni))
+  <|> (fun ctx -> check ctx e (VTypeLit PInt))
+  <|> (fun ctx -> check ctx e (VTypeLit PFloat))
+  <|> (fun ctx -> check ctx e (VTypeLit PString))
+  <|> (fun ctx -> check ctx e (VTypeLit PChar))
+  <|> (fun ctx -> check ctx e (VTypeLit PBool))
+  <|> (fun ctx -> check ctx e (VTypeLit PUnit))) ctx
 
 
 let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
@@ -494,8 +506,8 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
   let ctx = empty_ctx () in
   let* tdecls, ctx =
     let rec check_decls ctx acc ts =
-      (* we check fields/variants in the form of string * Ast.located_expr. *)
-      let rec check_assoc ?(bind = false) ctx acc as_ : ctx * 'a result list =
+      (* we check fields/variants in the form of string * located_expr. *)
+      let rec check_assoc ?(bind = false) ctx acc as_ =
         match as_ with
         | [] -> (ctx, List.rev acc)
         | (n, t) :: as_ -> (
@@ -519,30 +531,35 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
       | (loc, (n, Ast.Variant (sig_, vs))) :: ts -> (
           let sig_ = is_type ctx sig_ in
           (* we bind variants so that they become 'functions' *)
-          let ctx, vs = check_assoc ~bind:true ctx [] vs in
-          match (sig_, combine_errors vs) with
-          | (Error _ as e1), (Error _ as e2) -> check_decls ctx (e1 :: e2 :: acc) ts
-          | (Error _ as e), _ | _, (Error _ as e) -> check_decls ctx (e :: acc) ts
-          | Ok sig_, Ok vs ->
-              let v = (loc, (n, Variant (sig_, vs))) in
-              let sig_' = to_val ctx.env sig_ in
-              check_decls (bind_var ~id:n ~t:sig_' ctx) (Ok v :: acc) ts)
+          match sig_ with
+          | Error _ as e -> check_decls ctx (e :: acc) ts
+          | Ok sig_ ->
+            let sig_' = to_val ctx.env sig_ in
+            let ctx = bind_var ~id:n ~t:sig_' ctx in
+            let ctx, vs = check_assoc ~bind:true ctx [] vs in
+            match combine_errors vs with
+            | (Error _ as e) -> check_decls ctx (e :: acc) ts
+            | Ok vs ->
+                let v = (loc, (n, Variant (sig_, vs))) in
+                check_decls ctx (Ok v :: acc) ts)
       | (loc, (n, Ast.Record (cons, sig_'', fs))) :: ts -> (
           let sig_ = is_type ctx sig_'' in
-          let ctx, fs = check_assoc ctx [] fs in
-          match (sig_, combine_errors fs) with
-          | (Error _ as e1), (Error _ as e2) -> check_decls ctx (e1 :: e2 :: acc) ts
-          | (Error _ as e), _ | _, (Error _ as e) -> check_decls ctx (e :: acc) ts
-          | Ok sig_, Ok fs ->
-              let r = (loc, (n, Record (cons, sig_, fs))) in
-              let sig_' = to_val ctx.env sig_ in
-              let ctx =
-                (* we hold the record information for checking Ast.RCons and Ast.RUpdate *)
-                let ctx = bind_var ~id:n ~t:sig_' ctx in
-                let fs = List.map (fun (i, t) -> (i, to_val ctx.env t)) fs in
-                { ctx with records = (cons, sig_'', fs) :: ctx.records }
-              in
-              check_decls ctx (Ok r :: acc) ts)
+          match sig_ with
+          | Error _ as e -> check_decls ctx (e :: acc) ts
+          | Ok sig_ ->
+            let sig_' = to_val ctx.env sig_ in
+            let ctx = bind_var ~id:n ~t:sig_' ctx in
+            let ctx, fs = check_assoc ctx [] fs in
+            match combine_errors fs with
+            | Error _ as e -> check_decls ctx (e :: acc) ts
+            | Ok fs ->
+                let r = (loc, (n, Record (cons, sig_, fs))) in
+                let ctx =
+                  (* we hold the record information for checking Ast.RCons and Ast.RUpdate *)
+                  let fs = List.map (fun (i, t) -> (i, to_val ctx.env t)) fs in
+                  { ctx with records = (cons, sig_'', fs) :: ctx.records }
+                in
+                check_decls ctx (Ok r :: acc) ts)
     in
     let ctx, tdecls = check_decls ctx [] tdecls in
     let@ tdecls = combine_errors tdecls in

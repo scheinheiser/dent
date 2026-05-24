@@ -85,8 +85,8 @@ let rec pp_expr out ((_, e) : located_expr) =
   | TypeLit p -> Format.fprintf out "%a" pp_prim p
   | RCons (i, fields) ->
       let pp_field out (i, v) = Format.fprintf out "%s = %a" i pp_expr v in
-      Format.fprintf out "%s @[{@,%a@]}" i
-        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ";@,") pp_field)
+      Format.fprintf out "%s @[{ @,%a@] }" i
+        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "; @,") pp_field)
         fields
   | RUpdate (_, i, fields) ->
       let pp_field out (i, v) = Format.fprintf out "%s = %a" i pp_expr v in
