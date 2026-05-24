@@ -1,6 +1,6 @@
 module TypeExample
 
-union Pair : (a: Type) -> (b: Type) -> Pair a b = 
+union Pair : (a, b: Type) -> Pair a b = 
   Cross : a -> b -> Pair a b
 
 dec fst : Pair a b -> a

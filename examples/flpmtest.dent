@@ -9,11 +9,11 @@ dec sum : List Int -> Int
 def sum [] := 0
 def sum (x :: xs) := x + sum xs
 
-dec map : (a : Type) -> (b : Type) -> (a -> b) -> List a -> List b
+dec map : (a, b : Type) -> (a -> b) -> List a -> List b
 def map _ _ _ [] := []
 def map a b f (x :: xs) := f x :: map a b f xs
 
-dec chooseType : Bool -> Type 0
+dec chooseType : Bool -> Type
 def chooseType true := Int
 def chooseType false := String
 

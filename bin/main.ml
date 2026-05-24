@@ -7,7 +7,7 @@ let border () =
 
 
 let () =
-  let input = In_channel.(open_text "examples/tc.dent" |> input_all) in
+  let input = In_channel.(open_text "examples/pair.dent" |> input_all) in
   (* let input = "{a : Type} -> {b : Type} -> (a -> b) -> List a -> List b" in *)
   let l = Lexer.of_string input in
   let res = Parser.parse_program l in
