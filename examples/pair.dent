@@ -1,15 +1,26 @@
 module TypeExample
 
-alias Status := Bool
+alias IsWorker := Bool
 
 union Pair : (a, b: Type) -> Type = 
   Cross : (a, b: Type) -> Pair a b
 
-dec status : Status
-def status := true
+record Person : Type = 
+  constructor MkPerson
+  | name       : String
+  | age        : Int
+  (*| isEmployed : IsWorker -- a field with an alias doesn't function correctly. *)
 
+dec myInt : Int
+def myInt := 5
+
+dec myP : Person
+def myP := MkPerson { name = "john"; age = 10 }
+
+(*
 dec fst : (a, b : Type) -> Pair a b -> a
 def fst _ _ (Cross x _) := x
 
 dec snd : (a, b : Type) -> Pair a b -> b
 def snd _ _ (Cross _ y) := y
+*)

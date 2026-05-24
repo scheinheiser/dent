@@ -171,8 +171,13 @@ let rec conv (lvl : lvl) (l : val_) (r : val_) : bool =
       (* go into the closure and check that the bound variables are equal *)
       conv lvl ll rl && conv (lvl + 1) (lc $$ VLocal lvl) (rc $$ VLocal lvl)
   | VLam (_, lc), VLam (_, rc) -> conv (lvl + 1) (lc $$ VLocal lvl) (rc $$ VLocal lvl)
-  (* (fun x -> M x) N => M N *)
-  | VLam (_, cl), r -> conv (lvl + 1) (cl $$ VLocal lvl) (VAp (0, r, VLocal lvl))
+  | VLam (_, cl), r -> 
+    (*
+       check that applying the right to the captured variable is 
+       the same as going into the closure with the captured variable
+       (fun x -> M x) N => M N
+    *)
+    conv (lvl + 1) (cl $$ VLocal lvl) (VAp (0, r, VLocal lvl))
   | l, VLam (_, cl) -> conv (lvl + 1) (VAp (0, l, VLocal lvl)) (cl $$ VLocal lvl)
   | _ -> false
 
@@ -190,8 +195,8 @@ let ( <|> ) l r ctx =
 
 let combine_errors = Base.Or_error.combine_errors
 
-(* constructor, overall type, field name & type *)
-type record_info = string * Ast.located_expr * (string * val_) list
+(* record name, constructor, overall type, field name & type *)
+type record_info = string * string * Ast.located_expr * (string * val_) list
 type ty = string * val_
 type ctx = { env : env; tys : ty list; records : record_info list; lvl : lvl }
 
@@ -257,7 +262,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result 
       else
         make_err
           ( Some loc,
-            Format.asprintf "Ex@[<v>pected type %a@,but inferred type %a.@]" pp_val ex pp_val t )
+            Format.asprintf "Ex@[<v>pected type %a@,but inferred type %a@]" pp_val ex pp_val t )
 
 
 and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
@@ -361,9 +366,9 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
       in
       (Match (c, bs), t)
   | Ast.RCons (cons, fs) -> (
-      match List.find_opt (fun (c, _, _) -> cons = c) ctx.records with
+      match List.find_opt (fun (_, c, _, _) -> cons = c) ctx.records with
       | None -> make_err (Some loc, Printf.sprintf "Undefined record constructor - '%s'." cons)
-      | Some (_, overall_t, ex_fs) ->
+      | Some (_, cons, overall_t, ex_fs) ->
           (* recurses rightward into the type to get the return type *)
           let rec get_t = function Ap (_, _, r) -> get_t r | v -> v in
           let g = List.length fs in
@@ -375,7 +380,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
                   "In@[<v>correct amount of record fields.@,\
                    Expected %d field(s).@,\
                    Got %d field(s).@]"
-                  g e )
+                  e g )
           else
             let* fs =
               (*
@@ -387,7 +392,9 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
                   match List.assoc_opt ex_i fs with
                   | None ->
                       make_err (Some loc, Printf.sprintf "Uninitialised record field - '%s'." ex_i)
-                  | Some got -> check ctx got ex_t)
+                  | Some got -> 
+                    Format.fprintf Format.std_formatter "%s: %a@.@." ex_i pp_val ex_t;
+                    check ctx got ex_t)
                 ex_fs
               |> combine_errors
             in
@@ -395,12 +402,19 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
               let@ r = is_type ctx overall_t in
               get_t r |> to_val ctx.env
             in
+            let c = 
+              let r = List.find_mapi (fun n (x, t) -> if x = cons then Some (n, t) else None) ctx.tys in
+              match r with
+              | None -> raise (Error.InternalError "Internal error - record constructor not in ctx.")
+              | Some (n, _) -> Local n
+            in
             (* cons { x₁ = y₁; ...; xₙ = yₙ }  ==> cons y₁ .. yₙ *)
-            let cons = List.fold_left (fun n acc -> Ap (0, n, acc)) (List.hd fs) (List.tl fs) in
-            (cons, ret))
+            let cons = List.fold_left (fun n acc -> Ap (0, n, acc)) c fs in
+            cons, ret)
   | e -> Error.todo (Format.asprintf "finish infer - %a" Ast.pp_expr (Location.dummy_loc, e))
 
 and is_type (ctx : ctx) (e : Ast.located_expr) : tm result = 
+  (* check if it's a type of a type, or one of the builtin types *)
   ((fun ctx -> check ctx e (VTypeLit PUni))
   <|> (fun ctx -> check ctx e (VTypeLit PInt))
   <|> (fun ctx -> check ctx e (VTypeLit PFloat))
@@ -495,7 +509,7 @@ let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
       if not @@ conv ctx.lvl t' t then
         make_err
           ( Some loc,
-            Format.asprintf "Ex@[<v>pected type %a.@,But inferred type %a.@]" pp_val t' pp_val t )
+            Format.asprintf "Ex@[<v>pected type %a@,But inferred type %a@]" pp_val t' pp_val t )
       else
         let t = quote ctx.lvl t' in
         let d = (loc, (t, i, wb, b)) in
@@ -517,7 +531,8 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
                 let t' = to_val ctx.env t in
                 let ctx = bind_var ~id:n ~t:t' ctx in
                 check_assoc ctx (Ok (n, t) :: acc) as_
-            | Ok t -> check_assoc ctx (Ok (n, t) :: acc) as_)
+            | Ok t -> 
+              check_assoc ctx (Ok (n, t) :: acc) as_)
       in
       match ts with
       | [] -> (ctx, List.rev acc)
@@ -535,6 +550,10 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
           | Error _ as e -> check_decls ctx (e :: acc) ts
           | Ok sig_ ->
             let sig_' = to_val ctx.env sig_ in
+            (* 
+               we bind before checking variants to allow reference to the union type in variants 
+               i.e. | ( :: ) : (a : Type) -> List a -> List a
+            *)
             let ctx = bind_var ~id:n ~t:sig_' ctx in
             let ctx, vs = check_assoc ~bind:true ctx [] vs in
             match combine_errors vs with
@@ -543,21 +562,28 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
                 let v = (loc, (n, Variant (sig_, vs))) in
                 check_decls ctx (Ok v :: acc) ts)
       | (loc, (n, Ast.Record (cons, sig_'', fs))) :: ts -> (
+          (* gather all record fields and make an ap *)
           let sig_ = is_type ctx sig_'' in
           match sig_ with
           | Error _ as e -> check_decls ctx (e :: acc) ts
           | Ok sig_ ->
-            let sig_' = to_val ctx.env sig_ in
-            let ctx = bind_var ~id:n ~t:sig_' ctx in
+            let ctx = bind_var ~id:n ~t:(to_val ctx.env sig_) ctx in
             let ctx, fs = check_assoc ctx [] fs in
             match combine_errors fs with
             | Error _ as e -> check_decls ctx (e :: acc) ts
             | Ok fs ->
+                let csig =
+                  List.fold_left
+                    (fun acc (_, n) -> Pi (n, acc))
+                    sig_
+                    fs
+                in
+                let ctx = bind_var ~id:cons ~t:(to_val ctx.env csig) ctx in
                 let r = (loc, (n, Record (cons, sig_, fs))) in
                 let ctx =
                   (* we hold the record information for checking Ast.RCons and Ast.RUpdate *)
                   let fs = List.map (fun (i, t) -> (i, to_val ctx.env t)) fs in
-                  { ctx with records = (cons, sig_'', fs) :: ctx.records }
+                  { ctx with records = (n, cons, sig_'', fs) :: ctx.records }
                 in
                 check_decls ctx (Ok r :: acc) ts)
     in
@@ -569,8 +595,14 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let rec go ctx = function
       | [] -> Ok ctx
       | (i, t) :: ts ->
-          let* t = is_type ctx t in
-          let t = to_val ctx.env t in
+          (*NOTE: 
+            inferring here allows you to have a type signature that includes a record, but fails on basic types like Int. 
+              - it means that the actual type of the record is given, but the type of primitive (PUni) is given.
+            checking if it's a type allows basic types, but fails on records. 
+              - it means that the basic type is given, but the actual type of the record is discarded for its identifier.
+          *)
+          let* _, t = infer ctx t in
+          (* let t' = to_val ctx.env t in *)
           go (bind_var ~id:i ~t ctx) ts
     in
     let decs = List.filter_map (function _, Ast.Dec (i, t) -> Some (i, t) | _ -> None) defs in
@@ -626,7 +658,7 @@ let pp_when_block out (when_block : tm option) =
 
 
 let pp_definition out ((_, (t, f, when_block, body)) : located_definition) =
-  Format.fprintf out "(de@[<v>f %s { %a }@,%a@,%a@])" f pp_tm t pp_when_block when_block pp_tm body
+  Format.fprintf out "(de@[<v>f %s { %a }@,%a@,%a@]@.)" f pp_tm t pp_when_block when_block pp_tm body
 
 
 let pp_module out (mod_name : string) = Format.fprintf out "(module %s)" mod_name
