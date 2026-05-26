@@ -1,22 +1,48 @@
 module Testing
 
-(*
+union Pair : (a, b : Type) → Type =
+  ( × ) : (a, b : Type) → Pair a b
+
+(* WORKING *)
 dec chooseType : Type
 def chooseType :=
   match true to
   | true => Int
   | false => String
 
+(* WORKING *)
 dec myInt : Int -> Int
 def myInt x := x
-*)
 
-dec Γ : (a : Type) -> Bool -> a
-dec α : (a, b : Type) → a → b → a
-dec 𝔹 : (a, b : Type) -> Bool
+(* WORKING *)
+dec bint : Int
+def bint := 10
 
-dec id : (a : Type) → a → a
-def id := λ a → (λ x →  _)
+(* WORKING *)
+dec ( ¬ ) : Bool → Bool
+def ( ¬ ) b :=
+  match b to
+  | true ⇒ false
+  | false ⇒ true
+
+(* WORKING *)
+dec ( ∧ ) : Bool -> Bool -> Bool
+def ( ∧ ) l r :=
+  match l to
+  | false ⇒ false
+  | true ⇒ r
+
+(* WORKING *)
+dec aBool : Bool
+def aBool :=
+  let α : Bool = ¬ true in
+  let β : Bool = true ∧ false in
+  (*β ∧ (¬ α)*)
+  _
+
+(* NOT WORKING *)
+dec id : (b : Type) → b → b
+def id a x := _
 
 (*
 dec chooseType : Bool -> Type

@@ -426,6 +426,9 @@ module Parser = struct
                      expression, but got '%s'."
                     (Token.show tok) ) )
           l
+    | s, OP o ->
+      let@ (e, _) as v = parse_expr l (get_bp_with_fixity o om) om in
+      Location.combine s e, Ast.Ap (0, (s, Ast.Var (Ident o)), v)
     | pos, tok ->
         Lexer.make_err
           (Some pos, Printf.sprintf "Unexpected token while parsing left: %s" (Token.show tok))

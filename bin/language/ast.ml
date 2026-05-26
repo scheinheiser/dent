@@ -57,21 +57,21 @@ let rec pp_expr out ((_, e) : located_expr) =
       Format.fprintf out "(@[<hov>%a@])"
         Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_expr)
         t
-  | Ap (_, f, arg) -> Format.fprintf out "(%@ @[<hov>%a@ %a@])" pp_expr f pp_expr arg
+  | Ap (_, f, arg) -> Format.fprintf out "(@[<hov>%a@ %@ %a@])" pp_expr f pp_expr arg
   | Let (p, ty, v, n) ->
-      Format.fprintf out "@[<v>(@[<hov>%a@ %a@ %a@])@,%a@]" pp_pattern p
+      Format.fprintf out "@[<v>@[<hov>let %a@ = %a@ %a in@]@,%a@]" pp_pattern p
         Format.(pp_print_option ~none:(fun out () -> fprintf out "<none>") pp_expr)
         ty pp_expr v pp_expr n
   | If (cond, tbranch, fbranch) ->
-      Format.fprintf out "(if@[<v> %a@,%a@,%a@])" pp_expr cond pp_expr tbranch pp_expr fbranch
-  | Lam (arg, body) -> Format.fprintf out "(la@[<v>m (%a) %a@])" pp_pattern arg pp_expr body
+      Format.fprintf out "i@[<v>f %a@,then@ %a@,else@ %a@]" pp_expr cond pp_expr tbranch pp_expr fbranch
+  | Lam (arg, body) -> Format.fprintf out "λ @[<v>%a.@,%a@]" pp_pattern arg pp_expr body
   | Match (cond, bs) ->
       let pp_branch out (p, wb, b) =
-        Format.fprintf out "(wh@[<v>en %a@,(%a) %a@])"
+        Format.fprintf out "(wh@[<v>en %a@,(%a) ⇒ %a@])"
           Format.(pp_print_option ~none:(fun out () -> fprintf out "true") pp_expr)
           wb pp_pattern p pp_expr b
       in
-      Format.fprintf out "(ma@[<v>tch (%a)@,%a@])" pp_expr cond
+      Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_expr cond
         Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
         bs
   | Pi (b, l, r) ->
@@ -81,7 +81,7 @@ let rec pp_expr out ((_, e) : located_expr) =
         | Some (x, false) -> Format.asprintf "(%s : %a)" x pp_expr l
         | Some (x, true) -> Format.asprintf "{%s : %a}" x pp_expr l
       in
-      Format.fprintf out "(-> %s %a)" l pp_expr r
+      Format.fprintf out "%s -> %a" l pp_expr r
   | TypeLit p -> Format.fprintf out "%a" pp_prim p
   | RCons (i, fields) ->
       let pp_field out (i, v) = Format.fprintf out "%s = %a" i pp_expr v in
