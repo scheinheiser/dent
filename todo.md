@@ -5,6 +5,7 @@
 - [x] Parse implicit arguments
 - [x] Mutiple arguments in a single binding (i.e. `(a, b, c : Type)`)
 - [x] Properly desugar record constructors.
+- [ ] Consider pattern synonyms? like in haskell.
 
 ## Parser
 - [x] Migrate from use of exceptions to a custom error type.
@@ -14,8 +15,8 @@
 ## Elaborator
 - [x] Get basic elaboration working (no holes/solving holes, no implicit arguments).
   - [x] Typecheck basic type-level programming.
-  - [ ] Properly typecheck match cases (compare patterns to condition type/whatever).
   - [ ] Make sure that aliases, unions and records actually work.
 - [ ] Add meta variables and solving of them to allow for inference of typed holes.
   - [ ] Typecheck functions with arguments
+  - [ ] Properly typecheck match cases (compare patterns to condition type/whatever).
 - [ ] Make implicit arguments work properly.

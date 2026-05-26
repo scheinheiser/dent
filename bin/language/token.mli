@@ -56,7 +56,6 @@ and token =
   | LBRACK
   | RBRACK
   | SEMI
-  | SEMISEMI
   | COLON
   | EQ
   | ASSIGNMENT
@@ -65,7 +64,6 @@ and token =
   | ATSIGN
   | DOT
   | COMMA
-  | BTICK
   | WILDCARD
   | EOF
 

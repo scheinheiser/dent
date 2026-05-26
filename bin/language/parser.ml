@@ -46,7 +46,6 @@ module Lexer : sig
   type 'a result = 'a Base.Or_error.t
 
   val make_err : Error.t -> 'a result
-  val of_lexbuf : Lexing.lexbuf -> t
   val of_string : string -> t
   val current : t -> Token.t
   val current_pos : t -> Location.t
@@ -69,7 +68,7 @@ end = struct
   let make_err (e : Error.t) : 'a Base.Or_error.t = Base.Or_error.error_string @@ Error.format_err e
   let get { tokens } = tokens
 
-  let of_lexbuf (lexbuf : Lexing.lexbuf) : t =
+  let of_lexbuf (lexbuf : Sedlexing.lexbuf) : t =
     let rec aux acc =
       let next = Lexer.token lexbuf in
       match next with
@@ -81,7 +80,7 @@ end = struct
     aux []
 
 
-  let of_string (s : string) : t = Lexing.from_string s |> of_lexbuf
+  let of_string (s : string) : t = Sedlexing.Utf8.from_string s |> of_lexbuf
 
   let current (stream : t) : Token.t =
     match stream.tokens with t :: _ -> t | [] -> (Location.dummy_loc, Token.EOF)
@@ -623,7 +622,7 @@ module Parser = struct
 
   and parse_lam (l : Lexer.t) (om : operator_map) (s : Location.t) : Ast.located_expr Lexer.result =
     let* args = parse_args l in
-    let* _ = Lexer.consume l ARROW "Expected '->' after lambda arguments." in
+    let* _ = Lexer.consume l ARROW "Expected '->' or '→' after lambda arguments." in
     let@ b = parse_expr l 0 om in
     let loc = Location.combine s (Lexer.current_pos l) in
     List.fold_right (fun n acc -> (loc, Ast.Lam (n, acc))) args b
@@ -643,7 +642,7 @@ module Parser = struct
             Some e
         | _ -> ok None
       in
-      let* _ = Lexer.consume l F_ARROW "Expected '=>' after match pattern." in
+      let* _ = Lexer.consume l F_ARROW "Expected '=>' or '⇒' after match pattern." in
       let@ e = parse_expr l 0 om in
       (p, wb, e)
     in

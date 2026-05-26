@@ -67,7 +67,7 @@ let rec pp_expr out ((_, e) : located_expr) =
   | Lam (arg, body) -> Format.fprintf out "(la@[<v>m (%a) %a@])" pp_pattern arg pp_expr body
   | Match (cond, bs) ->
       let pp_branch out (p, wb, b) =
-        Format.fprintf out "(wh@[<v>en %a@,%a %a@])"
+        Format.fprintf out "(wh@[<v>en %a@,(%a) %a@])"
           Format.(pp_print_option ~none:(fun out () -> fprintf out "true") pp_expr)
           wb pp_pattern p pp_expr b
       in

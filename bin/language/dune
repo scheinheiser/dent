@@ -1,5 +1,5 @@
 (library
  (name language)
- (libraries util base mparser))
-
-(ocamllex lexer)
+ (libraries util base sedlex)
+ (preprocess
+  (pps sedlex.ppx)))

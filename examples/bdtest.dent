@@ -3,17 +3,20 @@ module TypeExample
 alias IsWorker := Bool
 
 union Pair : (a, b: Type) -> Type = 
-  Cross : (a, b: Type) -> Pair a b
+  | Cross : (a, b: Type) -> Pair a b
+  | Bing : IsWorker -> (a, b: Type) -> Pair a b
 
 record Person : Type = 
   constructor MkPerson
   | name       : String
   | age        : Int
-  (*| isEmployed : IsWorker -- a field with an alias doesn't function correctly. *)
+  (*| isEmployed : IsWorker -- DOESN'T WORK *)
 
-dec myInt : Int
-def myInt := 5
+(* INCONSISTENT *)
+(*dec myInt : Int*)
+def myInt := 10
 
+(* INCONSISTENT *)
 dec myP : Person
 def myP := MkPerson { name = "john"; age = 10 }
 
@@ -23,4 +26,8 @@ def fst _ _ (Cross x _) := x
 
 dec snd : (a, b : Type) -> Pair a b -> b
 def snd _ _ (Cross _ y) := y
+
+-- DOESN'T WORK
+dec test : Pair Int Bool
+def test := Cross Int Bool 10 true
 *)

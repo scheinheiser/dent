@@ -1,0 +1,30 @@
+module Testing
+
+(*
+dec chooseType : Type
+def chooseType :=
+  match true to
+  | true => Int
+  | false => String
+
+dec myInt : Int -> Int
+def myInt x := x
+*)
+
+dec Γ : (a : Type) -> Bool -> a
+dec α : (a, b : Type) → a → b → a
+dec 𝔹 : (a, b : Type) -> Bool
+
+dec id : (a : Type) → a → a
+def id := λ a → (λ x →  _)
+
+(*
+dec chooseType : Bool -> Type
+def chooseType t :=
+  match t to
+  | true => Int
+  | false => String
+
+dec myNum : chooseType true
+def myNum := 10
+*)

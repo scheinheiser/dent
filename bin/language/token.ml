@@ -56,7 +56,6 @@ and token =
   | LBRACK
   | RBRACK
   | SEMI
-  | SEMISEMI
   | COLON
   | EQ
   | ASSIGNMENT
@@ -65,7 +64,6 @@ and token =
   | ATSIGN
   | DOT
   | COMMA
-  | BTICK
   | WILDCARD
   | EOF
 
@@ -125,7 +123,6 @@ let show (t : token) : string =
   | LBRACK -> "LBRACK"
   | RBRACK -> "RBRACK"
   | SEMI -> "SEMI"
-  | SEMISEMI -> "SEMISEMI"
   | COLON -> "COLON"
   | EQ -> "EQ"
   | ASSIGNMENT -> "ASSIGNMENT"
@@ -134,6 +131,5 @@ let show (t : token) : string =
   | ATSIGN -> "ATSIGN"
   | DOT -> "DOT"
   | COMMA -> "COMMA"
-  | BTICK -> "BTICK"
   | WILDCARD -> "WILDCARD"
   | EOF -> "EOF"
