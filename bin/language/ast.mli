@@ -19,10 +19,9 @@ and expr =
   | Const of const
   | Var of ident
   | TypeLit of prim
-  | Pi of bind option * located_expr * located_expr
+  | Pi of bind * located_expr * located_expr
   | RCons of string * (string * located_expr) list (* cons { x₁ = y₁; ...; xₙ = yₙ } *)
-  | RUpdate of
-      string * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
+  | RUpdate of string * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
 
 and bind = string * bool (* identifier, is implicit? *)

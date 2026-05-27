@@ -1,13 +1,14 @@
+(* severity of the message *)
 type t =
-    | Debug of src option * string
-    | Info of string
-    | Warn of (Location.t option * string)
-    | Error of (Location.t option * string)
+  | Debug of (src option * string)
+  | Info of string
+  | Warn of (Location.t option * string)
+  | Error of (Location.t option * string)
 
-and src = (string * string * int * int * int)
+and src = string * string * int * int * int
 
 (* turns the compiler debug values into a value of type src *)
-val comp_to_src : string -> (string * int * int * int) -> src
+val comp_to_src : string -> string * int * int * int -> src
 
 (* formats an optional src and message into a debug message *)
 val fmt_debug : src option -> string -> string
@@ -27,5 +28,5 @@ val log : t -> unit
 (* helpers to more conveniently log messages to the console *)
 val dbg : src option -> string -> unit
 val info : string -> unit
-val warn : (Location.t option * string) -> unit
-val err : (Location.t option * string) -> unit
+val warn : Location.t option * string -> unit
+val err : Location.t option * string -> unit

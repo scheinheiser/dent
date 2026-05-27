@@ -9,6 +9,12 @@ module OM = Map.Make (String)
 
 type operator_map = (int * assoc) OM.t
 
+let fresh =
+  let i = ref (- 1) in
+  fun () ->
+    incr i;
+    !i
+
 let fresh_om () : operator_map = OM.empty
 let ( >>= ) = Base.Or_error.( >>= )
 let ( >>| ) = Base.Or_error.( >>| )
@@ -370,9 +376,9 @@ module Parser = struct
     | s, TTYPE -> ok @@ (s, Ast.TypeLit PUni)
     | s, IDENT i -> ok (s, Ast.Var (Ident i))
     | s, UPPER_IDENT i ->
-        (( fun l ->
+        ( (fun l ->
             let@ e, fields = parse_record_fields l om in
-            (Location.combine s e, Ast.RCons (i, fields)) )
+            (Location.combine s e, Ast.RCons (i, fields)))
         <|> fun _ -> ok (s, Ast.Var (Udc i)) )
           l
     | s, DOT_SEP_IDENT is -> ok (s, Ast.Var (AccessIdent is))
@@ -380,13 +386,12 @@ module Parser = struct
     | s, IF -> parse_if l om s
     | s, FUN -> parse_lam l om s
     | s, MATCH -> parse_match l om s
-    | s, LBRACE -> 
-      (fun l -> parse_binding l ~is_imp:true s om)
-      <|> 
-      (fun l ->
-        let* ru = parse_record_update l om in
-        let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
-        (Location.combine s e, ru))
+    | s, LBRACE ->
+        ( (fun l -> parse_binding l ~is_imp:true s om) <|> fun l ->
+          let* ru = parse_record_update l om in
+          let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
+          (Location.combine s e, ru) )
+          l
     | s, LBRACK ->
         ( (fun l ->
             let@ e =
@@ -430,8 +435,8 @@ module Parser = struct
                     (Token.show tok) ) )
           l
     | s, OP o ->
-      let@ (e, _) as v = parse_expr l (get_bp_with_fixity o om) om in
-      Location.combine s e, Ast.Ap (0, (s, Ast.Var (Ident o)), v)
+        let@ ((e, _) as v) = parse_expr l (get_bp_with_fixity o om) om in
+        (Location.combine s e, Ast.Ap (0, (s, Ast.Var (Ident o)), v))
     | pos, tok ->
         Lexer.make_err
           (Some pos, Printf.sprintf "Unexpected token while parsing left: %s" (Token.show tok))
@@ -448,7 +453,7 @@ module Parser = struct
           Ast.Ap (0, (loc, Ast.Ap (0, op, left)), r)
       | ARROW ->
           let@ r = parse_expr l 0 om in
-          Ast.Pi (None, left, r)
+          Ast.Pi (("_" , false), left, r)
       | WILDCARD -> ok (Ast.Ap (0, left, (s, Ast.Hole)))
       | INT i -> ok (Ast.Ap (0, left, (s, Ast.Const (Int i))))
       | FLOAT f -> ok (Ast.Ap (0, left, (s, Ast.Const (Float f))))
@@ -467,12 +472,9 @@ module Parser = struct
           ok @@ Ast.Ap (0, left, r)
       | UPPER_IDENT i ->
           let* r =
-            ( ( (fun l ->
-                  let@ e, existing_i, fields = parse_record_update l om in
-                  (Location.combine s e, Ast.RUpdate (i, existing_i, fields)))
-              <|> fun l ->
+            ( (fun l ->
                 let@ e, fields = parse_record_fields l om in
-                (Location.combine s e, Ast.RCons (i, fields)) )
+                (Location.combine s e, Ast.RCons (i, fields)))
             <|> fun _ -> ok (s, Ast.Var (Udc i)) )
               l
           in
@@ -501,13 +503,12 @@ module Parser = struct
           in
           Ast.Ap (0, left, r)
       | LBRACE ->
-          let@ r = 
-            ((fun l -> parse_binding ~is_imp:true l s om)
-            <|> 
-             (fun l ->
-                let* ru = parse_record_update l om in
-                let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
-                (Location.combine s e, ru))) l
+          let@ r =
+            ( (fun l -> parse_binding ~is_imp:true l s om) <|> fun l ->
+              let* ru = parse_record_update l om in
+              let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
+              (Location.combine s e, ru) )
+              l
           in
           Ast.Ap (0, left, r)
       | LPAREN ->
@@ -563,43 +564,43 @@ module Parser = struct
     let* _ = Lexer.consume l ARROW "Expected an '->' after a type binding." in
     let@ ((e, _) as r) = parse_expr l 0 om in
     let loc = Location.combine s e in
-    List.fold_right (fun n acc -> (loc, Ast.Pi (Some (n, is_imp), l', acc))) is r
+    List.fold_right (fun n acc -> (loc, Ast.Pi ((n, is_imp), l', acc))) is r
 
 
   and parse_record_fields (l : Lexer.t) (om : operator_map) :
       (Location.t * (string * Ast.located_expr) list) Lexer.result =
     let* _ = Lexer.consume l LBRACE "Expected a '{' to begin a record constructor." in
     let parse_field l =
-      ((fun l ->
-        let* id = parse_lower_ident l in
-        let* _ =
-          Lexer.consume l ASSIGNMENT
-            "Expected a ':=' to separate identifier and expression in record construction."
-        in
-        let@ v = parse_expr l 0 om in
-        (id, v))
+      ( (fun l ->
+          let* id = parse_lower_ident l in
+          let* _ =
+            Lexer.consume l ASSIGNMENT
+              "Expected a ':=' to separate identifier and expression in record construction."
+          in
+          let@ v = parse_expr l 0 om in
+          (id, v))
       <|>
       (* 
          record punning; 
          cons { x₁; ...; xₙ } ⇒ cons { x₁ = x₁; ...; xₙ = xₙ }
-         checking that it's a valid field occurs in elaboration.
+         checking if it's a valid field occurs in elaboration.
       *)
-      (fun l ->
+      fun l ->
         let s = Lexer.current_pos l in
         let@ id = parse_lower_ident l in
-        let v = s, Ast.Var (Ident id) in
-        (id, v))) l
+        let v = (s, Ast.Var (Ident id)) in
+        (id, v) )
+        l
     in
     let* fields = Lexer.separated_list l ~sep:SEMI parse_field in
     let@ e = Lexer.consume_with_pos l RBRACE "Expected a '}' to end a record constructor." in
     (e, fields)
 
 
-  and parse_record_update (l : Lexer.t) (om : operator_map) :
-      Ast.expr Lexer.result =
+  and parse_record_update (l : Lexer.t) (om : operator_map) : Ast.expr Lexer.result =
     let* i = parse_lower_ident l in
     let* _ = Lexer.consume l WHERE "Expected 'where' after identifier in record update." in
-    let* fields =
+    let@ fields =
       Lexer.separated_list l ~sep:SEMI (fun l ->
           let* id = parse_lower_ident l in
           let* _ =

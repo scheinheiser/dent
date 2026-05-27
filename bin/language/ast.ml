@@ -18,10 +18,9 @@ and expr =
   | Const of const
   | Var of ident
   | TypeLit of prim
-  | Pi of bind option * located_expr * located_expr
+  | Pi of bind * located_expr * located_expr
   | RCons of string * (string * located_expr) list (* cons { x₁ = y₁; ...; xₙ = yₙ } *)
-  | RUpdate of
-      string * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
+  | RUpdate of string * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
 
 and bind = string * bool (* identifier, is implicit? *)
@@ -63,8 +62,9 @@ let rec pp_expr out ((_, e) : located_expr) =
         Format.(pp_print_option ~none:(fun out () -> fprintf out "<none>") pp_expr)
         ty pp_expr v pp_expr n
   | If (cond, tbranch, fbranch) ->
-      Format.fprintf out "i@[<v>f %a@,then@ %a@,else@ %a@]" pp_expr cond pp_expr tbranch pp_expr fbranch
-  | Lam (arg, body) -> Format.fprintf out "λ @[<v>%a.@,%a@]" pp_pattern arg pp_expr body
+      Format.fprintf out "i@[<v>f %a@,then@ %a@,else@ %a@]" pp_expr cond pp_expr tbranch pp_expr
+        fbranch
+  | Lam (arg, body) -> Format.fprintf out "λ %a. %a" pp_pattern arg pp_expr body
   | Match (cond, bs) ->
       let pp_branch out (p, wb, b) =
         Format.fprintf out "(wh@[<v>en %a@,(%a) ⇒ %a@])"
@@ -77,9 +77,8 @@ let rec pp_expr out ((_, e) : located_expr) =
   | Pi (b, l, r) ->
       let l =
         match b with
-        | None -> Format.asprintf "%a" pp_expr l
-        | Some (x, false) -> Format.asprintf "(%s : %a)" x pp_expr l
-        | Some (x, true) -> Format.asprintf "{%s : %a}" x pp_expr l
+        | x, false -> Format.asprintf "(%s : %a)" x pp_expr l
+        | x, true -> Format.asprintf "{%s : %a}" x pp_expr l
       in
       Format.fprintf out "%s -> %a" l pp_expr r
   | TypeLit p -> Format.fprintf out "%a" pp_prim p
