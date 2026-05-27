@@ -1,5 +1,7 @@
 module Testing
 
+(*
+(* WORKING *)
 union Pair : (a, b : Type) → Type =
   ( × ) : (a, b : Type) → Pair a b
 
@@ -32,7 +34,15 @@ def ( ∧ ) l r :=
   | false ⇒ false
   | true ⇒ r
 
-(* WORKING *)
+(* NOT WORKING *)
+dec ( ∨ ) : Bool -> Bool -> Bool
+def ( ∨ ) l r :=
+  match l × r to
+  | true × _ -> true
+  | _ × true -> true
+  | _ -> false
+
+(* WORKING (with both the hole or binary expressions) *)
 dec aBool : Bool
 def aBool :=
   let α : Bool = ¬ true in
@@ -41,8 +51,12 @@ def aBool :=
   _
 
 (* NOT WORKING *)
-dec id : (b : Type) → b → b
-def id a x := _
+dec id : (a : Type) → a → a
+def id b x := x
+*)
+
+dec const : (a, b : Type) -> a -> b -> a
+def const _ _ x _ := x
 
 (*
 dec chooseType : Bool -> Type

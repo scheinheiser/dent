@@ -28,17 +28,18 @@ record Person : (price: Type) -> Type =
 dec unsafeHead : (a : Type) -> List a -> a
 def unsafeHead _ (h :: _) := h
 
-dec getPrice : (price : Type) -> Basket price -> price
+dec getPrice : (a : Type) -> Basket a -> a
 def getPrice _ (Apple p)  := p
 def getPrice _ (Banana p) := p
-def getPrice _ (l :. r)   := getPrice l + getPrice r
+def getPrice a (l :. r)   := getPrice a l + getPrice a r
 def getPrice _ Bag        := 0
 
+(* you can pun record fields *)
 dec addEmployee : (price: Type) -> String -> Int -> Basket price -> Person price
-def addEmployee _ name age b := MkPerson { age = age; name = name; basket = b; status = true}
+def addEmployee _ name age basket := MkPerson { age; name; basket; status := true}
 
 dec personBasketPrice : (a : Type) -> Person a -> a
-def personBasketPrice price p := getPrice price p.basket
+def personBasketPrice ap := getPrice a p.basket
 
 dec addItem : (a : Type) -> Person a -> Basket a -> Person a
-def addItem _ p item := MkPerson { p where basket := item :. p.basket }
+def addItem _ p item := { p where basket := item :. p.basket }

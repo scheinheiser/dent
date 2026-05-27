@@ -21,7 +21,7 @@ and expr =
   | Pi of bind option * located_expr * located_expr
   | RCons of string * (string * located_expr) list (* cons { x₁ = y₁; ...; xₙ = yₙ } *)
   | RUpdate of
-      string * string * (string * located_expr) list (* cons { x where y₁ = z₁; ...; yₙ = zₙ } *)
+      string * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
 
 and bind = string * bool (* identifier, is implicit? *)
@@ -88,7 +88,7 @@ let rec pp_expr out ((_, e) : located_expr) =
       Format.fprintf out "%s @[{ @,%a@] }" i
         Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "; @,") pp_field)
         fields
-  | RUpdate (_, i, fields) ->
+  | RUpdate (i, fields) ->
       let pp_field out (i, v) = Format.fprintf out "%s = %a" i pp_expr v in
       Format.fprintf out "{%s wh@[ere@,%a@]}" i
         Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ";@,") pp_field)

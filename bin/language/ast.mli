@@ -22,7 +22,7 @@ and expr =
   | Pi of bind option * located_expr * located_expr
   | RCons of string * (string * located_expr) list (* cons { x₁ = y₁; ...; xₙ = yₙ } *)
   | RUpdate of
-      string * string * (string * located_expr) list (* cons { x where y₁ = z₁; ...; yₙ = zₙ } *)
+      string * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
 
 and bind = string * bool (* identifier, is implicit? *)

@@ -370,10 +370,7 @@ module Parser = struct
     | s, TTYPE -> ok @@ (s, Ast.TypeLit PUni)
     | s, IDENT i -> ok (s, Ast.Var (Ident i))
     | s, UPPER_IDENT i ->
-        ( ( (fun l ->
-              let@ e, existing_i, fields = parse_record_update l om in
-              (Location.combine s e, Ast.RUpdate (i, existing_i, fields)))
-          <|> fun l ->
+        (( fun l ->
             let@ e, fields = parse_record_fields l om in
             (Location.combine s e, Ast.RCons (i, fields)) )
         <|> fun _ -> ok (s, Ast.Var (Udc i)) )
@@ -383,7 +380,13 @@ module Parser = struct
     | s, IF -> parse_if l om s
     | s, FUN -> parse_lam l om s
     | s, MATCH -> parse_match l om s
-    | s, LBRACE -> parse_binding l ~is_imp:true s om
+    | s, LBRACE -> 
+      (fun l -> parse_binding l ~is_imp:true s om)
+      <|> 
+      (fun l ->
+        let* ru = parse_record_update l om in
+        let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
+        (Location.combine s e, ru))
     | s, LBRACK ->
         ( (fun l ->
             let@ e =
@@ -498,7 +501,14 @@ module Parser = struct
           in
           Ast.Ap (0, left, r)
       | LBRACE ->
-          let@ r = parse_binding ~is_imp:true l s om in
+          let@ r = 
+            ((fun l -> parse_binding ~is_imp:true l s om)
+            <|> 
+             (fun l ->
+                let* ru = parse_record_update l om in
+                let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
+                (Location.combine s e, ru))) l
+          in
           Ast.Ap (0, left, r)
       | LPAREN ->
           let s = Lexer.current_pos l in
@@ -559,23 +569,34 @@ module Parser = struct
   and parse_record_fields (l : Lexer.t) (om : operator_map) :
       (Location.t * (string * Ast.located_expr) list) Lexer.result =
     let* _ = Lexer.consume l LBRACE "Expected a '{' to begin a record constructor." in
-    let* fields =
-      Lexer.separated_list l ~sep:SEMI (fun l ->
-          let* id = parse_lower_ident l in
-          let* _ =
-            Lexer.consume l EQ
-              "Expected a '=' to separate identifier and expression in record construction."
-          in
-          let@ v = parse_expr l 0 om in
-          (id, v))
+    let parse_field l =
+      ((fun l ->
+        let* id = parse_lower_ident l in
+        let* _ =
+          Lexer.consume l ASSIGNMENT
+            "Expected a ':=' to separate identifier and expression in record construction."
+        in
+        let@ v = parse_expr l 0 om in
+        (id, v))
+      <|>
+      (* 
+         record punning; 
+         cons { x₁; ...; xₙ } ⇒ cons { x₁ = x₁; ...; xₙ = xₙ }
+         checking that it's a valid field occurs in elaboration.
+      *)
+      (fun l ->
+        let s = Lexer.current_pos l in
+        let@ id = parse_lower_ident l in
+        let v = s, Ast.Var (Ident id) in
+        (id, v))) l
     in
+    let* fields = Lexer.separated_list l ~sep:SEMI parse_field in
     let@ e = Lexer.consume_with_pos l RBRACE "Expected a '}' to end a record constructor." in
     (e, fields)
 
 
   and parse_record_update (l : Lexer.t) (om : operator_map) :
-      (Location.t * string * (string * Ast.located_expr) list) Lexer.result =
-    let* _ = Lexer.consume l LBRACE "Expected '{' to begin record update." in
+      Ast.expr Lexer.result =
     let* i = parse_lower_ident l in
     let* _ = Lexer.consume l WHERE "Expected 'where' after identifier in record update." in
     let* fields =
@@ -588,8 +609,7 @@ module Parser = struct
           let@ v = parse_expr l 0 om in
           (id, v))
     in
-    let@ e = Lexer.consume_with_pos l RBRACE "Expected '}' to end record update." in
-    (e, i, fields)
+    Ast.RUpdate (i, fields)
 
 
   and parse_let (l : Lexer.t) (om : operator_map) (s : Location.t) : Ast.located_expr Lexer.result =

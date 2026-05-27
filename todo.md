@@ -8,9 +8,11 @@
 - [ ] Consider pattern synonyms? like in haskell.
 
 ## Diagnostics
-- [ ] Make a logging library
-  - [ ] Add different severities of messages.
-  - [ ] Add the option to colour output
+- [x] Make a logging library
+  - [x] Add different severities of messages.
+  - [x] Colour output
+- [ ] Replace any use of `Base.Or_error.t` with an `option`-style error, and use the logger to print errs to console.
+  - [ ] When done, remove error.ml.
 
 ## Parser
 - [x] Migrate from use of exceptions to a custom error type.
@@ -22,6 +24,10 @@
   - [x] Typecheck basic type-level programming.
 - [ ] Add meta variables and solving of them to allow for inference of typed holes.
   - [x] Typecheck functions with arguments
-  - [ ] Properly typecheck match cases (compare patterns to condition type/whatever).
+  - [ ] Properly typecheck match cases (compare patterns to condition type).
+  - [ ] Properly typecheck record update syntax.
   - [ ] Make sure that aliases, unions and records actually work.
+  - [ ] Add a pass over functions/expressions to ensure that there aren't any typed holes.
+    - if there is, report the inferred type to the user by looking up the mv in the meta context
+    - return a `None` (migrate to logging before this) to prevent further compilation.
 - [ ] Make implicit arguments work properly.
