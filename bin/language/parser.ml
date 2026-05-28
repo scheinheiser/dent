@@ -453,7 +453,7 @@ module Parser = struct
           Ast.Ap (0, (loc, Ast.Ap (0, op, left)), r)
       | ARROW ->
           let@ r = parse_expr l 0 om in
-          Ast.Pi (("_" , false), left, r)
+          Ast.Pi (("_", false), left, r)
       | WILDCARD -> ok (Ast.Ap (0, left, (s, Ast.Hole)))
       | INT i -> ok (Ast.Ap (0, left, (s, Ast.Const (Int i))))
       | FLOAT f -> ok (Ast.Ap (0, left, (s, Ast.Const (Float f))))
