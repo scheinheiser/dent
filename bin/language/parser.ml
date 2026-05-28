@@ -237,7 +237,7 @@ module Parser = struct
         | Some (p, _) -> p
         | None -> ( match OM.find_opt op om with Some (n, _) -> n | None -> 9))
     | UPPER_IDENT _ | IDENT _ | DOT_SEP_IDENT _ | INT _ | TY_INT | FLOAT _ | TY_FLOAT | CHAR _
-    | TY_CHAR | STRING _ | TY_STRING | BOOL _ | TY_BOOL | UNIT | TY_UNIT ->
+    | TY_CHAR | STRING _ | TY_STRING | BOOL _ | TY_BOOL | UNIT | TY_UNIT | WILDCARD ->
         10 (* for function application *)
     | EOF -> -2
     | _ -> -1

@@ -1,0 +1,7 @@
+module T
+
+dec chooseType : Bool -> Type
+def chooseType b := String
+
+dec v : chooseType _
+def v := "hello"

@@ -55,8 +55,14 @@ def aBool :=
 dec id : (a : Type) → a → a
 def id _ x := x
 
+(* WORKING *)
+dec nId : Int
+def nId := id Int 10
+
+(* WORKING *)
 dec const : (a, b : Type) → a → b → a
 def const a b x y := x
 
-dec nId : Int
-def nId := id Int 10
+(* WORKING *)
+dec nConst : Char
+def nConst := const String Float 'h' 10.0
