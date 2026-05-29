@@ -42,7 +42,7 @@ and token =
   | MODULE
   | IMPORT
   | ALIAS
-  | UNION
+  | DATA
   | RECORD
   | CONSTRUCTOR
   | UNIVERSE

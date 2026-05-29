@@ -7,14 +7,29 @@ type ident =
   | AccessIdent of string list
   | Udc of string (* user defined costructor *)
 
-type const = Int of int | Float of float | String of string | Char of char | Bool of bool | Unit
-type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni
+type const =
+  | Int of int
+  | Float of float
+  | String of string
+  | Char of char
+  | Bool of bool
+  | Unit
+
+type prim =
+  | PInt
+  | PFloat
+  | PString
+  | PChar
+  | PBool
+  | PUnit
+  | PUni
 
 type located_pattern = Location.t * pattern
 
 and pattern =
   | PWild (* _ *)
   | PConst of const
+  | PTypeLit of prim
   | PVar of string
   | PBop of located_pattern * string * located_pattern
   | PCtor of string * located_pattern list
@@ -22,7 +37,10 @@ and pattern =
 
 type located_import = Location.t * import
 and import = ident * import_cond option
-and import_cond = CWith of ident list | CWithout of ident list
+
+and import_cond =
+  | CWith of ident list
+  | CWithout of ident list
 
 (* const *)
 val const_equality : const -> const -> bool

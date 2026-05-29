@@ -1,10 +1,6 @@
 module Testing
 
 (* WORKING *)
-union Pair : (a, b : Type) → Type =
-  ( × ) : (a, b : Type) → Pair a b
-
-(* WORKING *)
 dec chooseType : Type
 def chooseType :=
   match true to

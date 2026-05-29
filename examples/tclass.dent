@@ -17,7 +17,7 @@ class Monoid : Semigroup (a : Type) => a includes
 end
 
 (* numbers *)
-union Nat : Type =
+data Nat : Type =
   | Z : Nat
   | S : Nat -> Nat
 
@@ -54,7 +54,7 @@ instance Monoid Nat where
 end
 
 (* lists *)
-union List : (a : Type) -> List a =
+data List : (a : Type) -> List a =
   | Nil : List a
   | ( :: ) : a -> List a -> List a
 

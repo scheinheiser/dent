@@ -27,7 +27,5 @@
   - [ ] Properly typecheck match cases (compare patterns to condition type).
   - [ ] Properly typecheck record update syntax.
   - [ ] Make sure that aliases, unions and records actually work.
-  - [ ] Add a pass over functions/expressions to ensure that there aren't any typed holes.
-    - if there is, report the inferred type to the user by looking up the mv in the meta context
-    - return a `None` (migrate to logging before this) to prevent further compilation.
+  - [x] Add a pass over functions/expressions to ensure that there aren't any typed holes.
 - [ ] Make implicit arguments work properly.

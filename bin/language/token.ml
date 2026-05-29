@@ -42,7 +42,7 @@ and token =
   | MODULE
   | IMPORT
   | ALIAS
-  | UNION
+  | DATA
   | RECORD
   | CONSTRUCTOR
   | UNIVERSE
@@ -109,7 +109,7 @@ let show (t : token) : string =
   | MODULE -> "MODULE"
   | IMPORT -> "IMPORT"
   | ALIAS -> "ALIAS"
-  | UNION -> "UNION"
+  | DATA -> "DATA"
   | RECORD -> "RECORD"
   | CONSTRUCTOR -> "CONSTRUCTOR"
   | UNIVERSE -> "UNIVERSE"

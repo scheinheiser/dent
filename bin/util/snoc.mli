@@ -1,15 +1,16 @@
+(* a reversed list. *)
 type 'a t =
   | Lin
-  | Snoc of ('a t) * 'a
+  | Snoc of 'a t * 'a
 
 (* the empty snoc list *)
 val empty : 'a t
 
-val length : 'a t -> int 
+(* find the length of a snoc list & index it *)
+val length : 'a t -> int
 val nth : 'a t -> int -> 'a
 
-(* push a value to the top of the list *)
-val append : 'a t -> 'a -> 'a t
+(* push a value to the end of the list *)
 val ( @> ) : 'a t -> 'a -> 'a t
 
 (* turn a list into a snoc list *)
@@ -19,7 +20,9 @@ val to_list : 'a t -> 'a list
 (* apply a function to every element of a list *)
 val map : ('a -> 'b) -> 'a t -> 'b t
 
+(* folding operations *)
 val fold_left : ('acc -> 'a -> 'acc) -> 'acc -> 'a t -> 'acc
 val fold_right : ('a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
 
+(* find_map that carries an index for each element in list *)
 val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option

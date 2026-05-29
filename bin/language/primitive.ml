@@ -8,16 +8,30 @@ type ident =
   | AccessIdent of string list
   | Udc of string (* user defined costructor *)
 
-type const = Int of int | Float of float | String of string | Char of char | Bool of bool | Unit
+type const =
+  | Int of int
+  | Float of float
+  | String of string
+  | Char of char
+  | Bool of bool
+  | Unit
 
 (*TODO: add universal hierarchies, where the type of Uₙ is Uₙ₊₁ *)
-type prim = PInt | PFloat | PString | PChar | PBool | PUnit | PUni (* A : Type *)
+type prim =
+  | PInt
+  | PFloat
+  | PString
+  | PChar
+  | PBool
+  | PUnit
+  | PUni (* A : Type *)
 
 type located_pattern = Location.t * pattern
 
 and pattern =
   | PWild (* _ *)
   | PConst of const
+  | PTypeLit of prim
   | PVar of string
   | PBop of located_pattern * string * located_pattern
   | PCtor of string * located_pattern list
@@ -25,7 +39,10 @@ and pattern =
 
 type located_import = Location.t * import
 and import = ident * import_cond option
-and import_cond = CWith of ident list | CWithout of ident list
+
+and import_cond =
+  | CWith of ident list
+  | CWithout of ident list
 
 (* utils *)
 let rec const_equality l r =
@@ -38,7 +55,6 @@ let rec const_equality l r =
   | Unit, Unit -> true
   | _ -> false
 
-
 and ( %= ) l r = const_equality l r
 
 let rec prim_equality l r =
@@ -49,10 +65,8 @@ let rec prim_equality l r =
   | PChar, PChar
   | PBool, PBool
   | PUnit, PUnit
-  | PUni, PUni ->
-      true
+  | PUni, PUni -> true
   | _ -> false
-
 
 and ( #= ) l r = prim_equality l r
 
@@ -65,16 +79,16 @@ let show_prim = function
   | PUnit -> "Unit"
   | PUni -> "U"
 
-
 (* idents *)
-let get_str = function Ident i | Udc i -> i | AccessIdent is -> String.concat "." is
+let get_str = function
+  | Ident i | Udc i -> i
+  | AccessIdent is -> String.concat "." is
 
 (* pretty printing *)
 let pp_ident out (i : ident) =
   match i with
   | Ident i | Udc i -> Format.fprintf out "%s" i
   | AccessIdent is -> Format.fprintf out "%s" (String.concat "." is)
-
 
 let pp_prim out (t : prim) = Format.fprintf out "%s" (show_prim t)
 
@@ -87,36 +101,37 @@ let pp_const out (c : const) =
   | Bool b -> Format.fprintf out "%b" b
   | Unit -> Format.fprintf out "()"
 
-
 let rec pp_pattern out ((_, arg) : located_pattern) =
   match arg with
   | PConst c -> pp_const out c
+  | PTypeLit p -> pp_prim out p
   | PWild -> Format.fprintf out "_"
   | PTuple ps ->
-      Format.fprintf out "(@[<hov>%a@])"
-        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_pattern)
-        ps
-  | PBop (l, cons, r) -> Format.fprintf out "(%s @[<hov>%a %a@])" cons pp_pattern l pp_pattern r
+    Format.fprintf out "(@[<hov>%a@])"
+      Format.(
+        pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_pattern)
+      ps
+  | PBop (l, cons, r) ->
+    Format.fprintf out "(%s @[<hov>%a %a@])" cons pp_pattern l pp_pattern r
   | PCtor (i, v) ->
-      Format.fprintf out "(%s %a)" i
-        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
-        v
+    Format.fprintf out "(%s %a)" i
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
+      v
   | PVar i -> Format.fprintf out "%s" i
-
 
 let pp_import_cond out (cond : import_cond) =
   match cond with
   | CWith includes ->
-      Format.fprintf out "with (@[<hov>%a@])"
-        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_ident)
-        includes
+    Format.fprintf out "with (@[<hov>%a@])"
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_ident)
+      includes
   | CWithout excludes ->
-      Format.fprintf out "without (@[<hov>%a@])"
-        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_ident)
-        excludes
-
+    Format.fprintf out "without (@[<hov>%a@])"
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_ident)
+      excludes
 
 let pp_import out ((_, (mod_name, cond)) : located_import) =
   Format.fprintf out "(import %a @[<hov>%a@])" pp_ident mod_name
-    Format.(pp_print_option ~none:(fun out () -> fprintf out "()") pp_import_cond)
+    Format.(
+      pp_print_option ~none:(fun out () -> fprintf out "()") pp_import_cond)
     cond

@@ -1,7 +1,40 @@
 module T
 
-dec chooseType : Bool -> Type
+(* ALIAS TESTS *)
+alias Boolean := Bool
+
+dec chooseType : Boolean → Type
 def chooseType b := String
 
 dec v : chooseType _
 def v := "hello"
+
+(* UNION TESTS *)
+data Pair : (a, b : Type) → Type =
+  ( × ) : (a, b : Type) → Pair a b
+
+(*
+dec fst : (a, b : Type) → Pair a b → a
+def fst := λ (x × _) → x
+
+dec snd : (a, b : Type) → Pair a b -> a
+def snd := λ _ _ (_ × y) → y
+
+dec swap : (a, b : Type) → Pair a b → Pair b a
+def swap := λ _ _ (x × y) → y × x
+
+dec map : (a, b : Type) → (b → c) → Pair a b → Pair a c
+def map := λ _ _ f (x × y) → x × f y
+*)
+
+(* RECORD TESTS *)
+(*
+record Point : Type =
+  constructor MkPoint
+  | x : Int
+  | y : Int
+
+dec point : Point
+def point := MkPoint { y := 10; x := 10}
+*)
+

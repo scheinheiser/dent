@@ -4,7 +4,7 @@ module TypeDeclSyntax
 alias IsWorker := Bool
 
 (* the type signature is declared similarly to let expressions. *)
-union Basket : (price: Type) -> Type =
+data Basket : (price: Type) -> Type =
   | Apple    : price -> Basket price (* explicit type signature for variants. *)
   | Banana   : price -> Basket price
   | Bag      : Basket price % empty variant

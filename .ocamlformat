@@ -1,8 +1,16 @@
 version = 0.28.1
-profile = default
+profile = conventional
 
-break-before-in = fit-or-vertical
-break-sequences = true
-let-binding-spacing = sparse
-margin = 100
-parse-docstrings = true
+leading-nested-match-parens = false
+space-around-variants = false
+space-around-arrays = false
+space-around-lists = false
+space-around-records = false
+break-infix = fit-or-vertical
+break-separators = after
+break-cases = fit-or-vertical
+cases-exp-indent = 2
+exp-grouping = preserve
+if-then-else = fit-or-vertical
+let-and = sparse
+type-decl = sparse
