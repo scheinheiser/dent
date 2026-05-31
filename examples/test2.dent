@@ -1,9 +1,9 @@
 module T
 
 (* ALIAS TESTS - WORKING *)
-(*
 alias Boolean := Bool
 
+(*
 dec chooseType : Boolean → Type
 def chooseType b :=
   match true to
@@ -37,9 +37,8 @@ record Point : Type =
   constructor MkPoint
   | x : Int
   | y : Int
+  | bing : Boolean
 
 dec point : Point
-def point := MkPoint { y := 10; x := 10}
-(*
-*)
-
+(*def point := MkPoint { y := 20; bing := true; x := 10 }*)
+def point := MkPoint 20 10 true

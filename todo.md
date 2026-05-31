@@ -11,8 +11,6 @@
 - [x] Make a logging library
   - [x] Add different severities of messages.
   - [x] Colour output
-- [ ] Replace any use of `Base.Or_error.t` with an `option`-style error, and use the logger to print errs to console.
-  - [ ] When done, remove error.ml.
 
 ## Parser
 - [x] Migrate from use of exceptions to a custom error type.
@@ -29,3 +27,4 @@
   - [ ] Make sure that aliases, unions and records actually work.
   - [x] Add a pass over functions/expressions to ensure that there aren't any typed holes.
 - [ ] Make implicit arguments work properly.
+- [ ] Migrate to an error enum, and use `Base.Result` with it so that I can better render lists of errors.

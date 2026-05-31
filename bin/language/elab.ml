@@ -431,9 +431,6 @@ let solve (loc : Location.t) (gamma : lvl) (mv : mv) (sp : spine) (rhs : val_) :
   let sol = to_val Snoc.empty @@ nest p.gamma rhs in
   mctx := MC.add mv (Solved sol) !mctx
 
-(* record name, constructor, overall type, field name & type *)
-type record_info = string * string * Ast.located_expr * (string * val_) list
-
 type ctx = {
   env : env;
   top : top_entry TC.t;
@@ -454,8 +451,9 @@ and def =
      check later on (in RCons) that the pulled TCon is a Some _.
      then do whatever else
   *)
-  | TCon of (string * val_) list option
+  | RCon of (string * tm) list
   | DCon of tm (* overall type, constructor func *)
+  | TCon
   | Axiom
 
 let empty_ctx () =
@@ -496,8 +494,11 @@ let define_func ~(id : string) ~(v : tm) ~(t : val_) (ctx : ctx) =
 let define_dcon ~(id: string) ~(t: val_) ~(v: tm) (ctx : ctx) =
   {ctx with top = TC.add id {ty = t; def = DCon v} ctx.top}
 
-let define_tcon ~(id: string) ~(t: val_) ~(fields: (string * val_) list option) (ctx: ctx) =
-  {ctx with top = TC.add id {ty = t; def = TCon fields} ctx.top}
+let define_tcon ~(id: string) ~(t: val_) (ctx: ctx) =
+  {ctx with top = TC.add id {ty = t; def = TCon} ctx.top}
+
+let define_rcon ~(id: string) ~(t: val_) ~(fields: (string * tm) list) (ctx: ctx) =
+  {ctx with top = TC.add id {ty = t; def = RCon fields} ctx.top}
 
 let lookup_top (i : string) (ctx : ctx) : (def * val_) option =
   match TC.find_opt i ctx.top with
@@ -563,8 +564,9 @@ let rec unify (loc : Location.t) (ctx : ctx) (l : val_) (r : val_) : unit result
     | Some (Def b, _) ->
       let b = to_val Snoc.empty b |> v_ap_sp sp in
       unify loc ctx b t
-    | Some (DCon _, t') | Some (TCon _, t') -> 
+    | Some (DCon _, t') | Some (TCon, t') -> 
       unify loc ctx t' t
+    | Some (RCon _, _) -> Error.todo ""
     | Some (Axiom, _) ->
       make_err
         (Some loc, Printf.sprintf "The function '%s' has no definition." i))
@@ -697,7 +699,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   | Ast.Pi ((i, _), l, r) ->
     let* l, n = is_type ctx l in
     let ctx = bind_var ~id:i ~t:(to_val ctx.env l) ctx in
-    let* r, n' = is_type ctx l in
+    let@ r, n' = is_type ctx r in
     let n = Int.max n n' in
     (Pi (i, l, r), VTypeLit (PUni n))
   | Ast.Let (p, t, b, n) -> (
@@ -765,33 +767,28 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     in
     (Match (c, bs), t)
   | Ast.RCons (cons, fs) -> (
-    match List.find_opt (fun (_, c, _, _) -> cons = c) ctx.records with
+    match lookup_top cons ctx with
     | None ->
       make_err
         (Some loc, Printf.sprintf "Undefined record constructor - '%s'." cons)
-    | Some (_, cons, overall_t, ex_fs) ->
-      (* recurses rightward into the type to get the return type *)
-      let rec get_t = function
-        | Ap (_, _, r) -> get_t r
+    | Some (RCon ex_fs, sig_) ->
+      let rec get_ret l = function
+        | VPi (n, _, cl) -> get_ret (l + 1) (cl $$ (VRigid (n, l, Snoc.empty)))
         | v -> v
       in
-      let g = List.length fs in
-      let e = List.length ex_fs in
-      if g <> e then
+      let got = List.length fs in
+      let ex = List.length ex_fs in
+      if got <> ex
+      then
         make_err
           ( Some loc,
             Format.asprintf
               "In@[<v>correct amount of record fields.@,\
                Expected %d field(s).@,\
                Got %d field(s).@]"
-              e g )
+              ex got )
       else
-        let* fs =
-          (*
-             we map over the expected fields, using them to pull the value from
-             the given fields. this also ensures that the fields are in the
-             correct order.
-          *)
+        let@ fs =
           List.map
             (fun (ex_i, ex_t) ->
               match List.assoc_opt ex_i fs with
@@ -799,25 +796,14 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
                 make_err
                   ( Some loc,
                     Printf.sprintf "Uninitialised record field - '%s'." ex_i )
-              | Some got -> check ctx got ex_t)
+              | Some got -> check ctx got (to_val Snoc.empty ex_t))
             ex_fs
           |> combine_errors
         in
-        let@ ret =
-          let@ r, _ = is_type ctx overall_t in
-          get_t r |> to_val ctx.env
-        in
-        let c =
-          match lookup_top cons ctx with
-          | None ->
-            raise
-              (Error.InternalError
-                 "Internal error - record constructor not in ctx.")
-          | _ -> Error.todo ""
-        in
-        (* cons { x₁ = y₁; ...; xₙ = yₙ }  ==> cons y₁ .. yₙ *)
-        let cons = List.fold_left (fun n acc -> Ap (0, n, acc)) c fs in
-        (cons, ret))
+        let cons = List.fold_left (fun n acc -> Ap (0, n, acc)) (Top cons) fs in
+        cons, get_ret 0 sig_
+    | Some (_, _) ->
+      make_err (Some loc, Printf.sprintf "Expected a record constructor, but got '%s'." cons))
   | e -> Error.todo (Format.asprintf "finish infer - %a" Ast.pp_expr (loc, e))
 
 and infer_universe loc = function
@@ -924,7 +910,7 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
       (* we check fields/variants in the form of string * located_expr. *)
       let pi_to_lam cons pi =
         (* 
-            ( × ) : (a : Type) → (b: Type) → Pair a b
+            given ( × ) : (a : Type) → (b: Type) → Pair a b
         *)
         let id_stack = 
           let rec go pi acc =
@@ -967,17 +953,17 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
       | (loc, (n, Ast.Alias t)) :: ts -> (
         match is_type ctx t with
         | Error _ as e -> check_decls ctx (e :: acc) ts
-        | Ok (v, n) ->
+        | Ok (v, l) ->
           let a = (loc, (n, Alias v)) in
           check_decls
-            (define_func ~id:n ~t:(VTypeLit (PUni n)) ~v ctx)
+            (define_func ~id:n ~t:(VTypeLit (PUni l)) ~v ctx)
             (Ok a :: acc) ts)
       | (loc, (n, Ast.Variant (sig_, vs))) :: ts -> (
         let sig_ = is_type ctx sig_ in
         match sig_ with
         | Error _ as e -> check_decls ctx (e :: acc) ts
         | Ok (sig_, _) -> (
-          let ctx = bind_func ~id:n ~t:(to_val Snoc.empty sig_) ctx in
+          let ctx = define_tcon ~id:n ~t:(to_val Snoc.empty sig_) ctx in
           let ctx, vs = check_assoc ~bind:true ctx [] vs in
           match combine_errors vs with
           | Error _ as e -> check_decls ctx (e :: acc) ts
@@ -985,7 +971,6 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
             let v = (loc, (n, Variant (sig_, vs))) in
             check_decls ctx (Ok v :: acc) ts))
       | (loc, (n, Ast.Record (cons, sig_'', fs))) :: ts -> (
-        (* gather all record fields and make an ap *)
         let sig_ = is_type ctx sig_'' in
         match sig_ with
         | Error _ as e -> check_decls ctx (e :: acc) ts
@@ -995,20 +980,15 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
           match combine_errors fs with
           | Error _ as e -> check_decls ctx (e :: acc) ts
           | Ok fs ->
+            (* build a type signature for the record *)
             let csig =
-              List.fold_left
-                (fun acc (_, n) -> Pi (fresh_bind_var (), n, acc))
-                sig_ fs
+              List.fold_right
+                (fun (_, n) acc -> Pi (fresh_bind_var (), n, acc))
+                fs sig_
             in
             Log.dbg None (Format.asprintf "csig := %a@." pp_tm csig);
-            let ctx = bind_func ~id:cons ~t:(to_val Snoc.empty csig) ctx in
+            let ctx = define_rcon ~id:cons ~t:(to_val Snoc.empty csig) ~fields:fs ctx in
             let r = (loc, (n, Record (cons, sig_, fs))) in
-            let ctx =
-              (* we hold the record information for checking Ast.RCons and
-                 Ast.RUpdate *)
-              let fs = List.map (fun (i, t) -> (i, to_val Snoc.empty t)) fs in
-              {ctx with records = (n, cons, sig_'', fs) :: ctx.records}
-            in
             check_decls ctx (Ok r :: acc) ts))
     in
     let ctx, tdecls = check_decls ctx [] tdecls in

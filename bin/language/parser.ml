@@ -392,11 +392,11 @@ module Parser = struct
       let* p =
         ((fun l ->
             let e = Lexer.current_pos l in
-            let@ n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
+            let* n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
             let loc = Location.combine s e in
             if n < 0
             then Lexer.make_err (Some loc, Printf.sprintf "Expected a natural number for universe level, but got '%d'." n)
-            else loc, PTypeLit (PUni n))
+            else ok (loc, PTypeLit (PUni n)))
         <|>
         fun _ ->
           ok @@ (s, PTypeLit (PUni 0))) (* α : Type ⇒ α : Type 0 *)
@@ -462,11 +462,11 @@ module Parser = struct
     | s, TTYPE -> 
       ((fun l ->
         let e = Lexer.current_pos l in
-        let@ n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
+        let* n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
         let loc = Location.combine s e in
         if n < 0
         then Lexer.make_err (Some loc, Printf.sprintf "Expected a natural number for universe level, but got '%d'." n)
-        else loc, Ast.TypeLit (PUni n))
+        else ok (loc, Ast.TypeLit (PUni n)))
       <|>
       fun _ ->
         ok @@ (s, Ast.TypeLit (PUni 0))) (* α : Type ⇒ α : Type 0 *)
@@ -597,11 +597,11 @@ module Parser = struct
         let@ r = 
           ((fun l ->
             let e = Lexer.current_pos l in
-            let@ n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
+            let* n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
             let loc = Location.combine s e in
             if n < 0
             then Lexer.make_err (Some loc, Printf.sprintf "Expected a natural number for universe level, but got '%d'." n)
-            else loc, Ast.TypeLit (PUni n))
+            else ok (loc, Ast.TypeLit (PUni n)))
           <|>
           fun _ ->
             ok @@ (s, Ast.TypeLit (PUni 0))) (* α : Type ⇒ α : Type 0 *)
