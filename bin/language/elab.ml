@@ -39,7 +39,7 @@ type tm =
   | Lam of string * tm
   | Const of const
   | TypeLit of prim
-  | Pi of string * tm * tm (* (x : α) -> α *)
+  | Pi of string * tm * tm (* (α : β) -> γ *)
 
 (* values for NbE *)
 and val_ =
@@ -48,7 +48,7 @@ and val_ =
   | VRigid of string * lvl * spine (* value equivalent of local in tm *)
   | VFlex of mv * spine (* value equivalent of a metavariable in tm *)
   | VTuple of val_ list
-  | VMatch of val_ * (located_pattern * val_ * val_) list
+  | VMatch of val_ * env * (located_pattern * tm * tm) list
   | VPi of string * val_ * closure
   | VTypeLit of prim
   | VConst of const
@@ -109,7 +109,7 @@ let rec pp_tm out (tm : tm) =
   | Let (p, ty, v, n) ->
     Format.fprintf out "@[<v 2>let %s : %a =@,%a@]@,in@,%a" p pp_tm ty pp_tm v
       pp_tm n
-  | Lam (arg, body) -> Format.fprintf out "λ@[<v> %s. {@,%a@]@,}" arg pp_tm body
+  | Lam (arg, body) -> Format.fprintf out "\\@[<v 2> %s. {@,%a@,}@]" arg pp_tm body
   | Match (c, bs) ->
     let pp_branch out (p, wb, b) =
       Format.fprintf out "(wh@[<v>en %a)@,(%a) ⇒ %a@]" pp_tm wb pp_pattern p
@@ -118,7 +118,7 @@ let rec pp_tm out (tm : tm) =
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_tm c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
       bs
-  | Pi (n, l, r) -> Format.fprintf out "@[<v>(%s : %a) → %a@]" n pp_tm l pp_tm r
+  | Pi (n, l, r) -> Format.fprintf out "@[<v>(%s : %a) -> %a@]" n pp_tm l pp_tm r
   | Mv m -> Format.fprintf out "?meta%d" m
   | IMv (m, bds) ->
     let to_str bd =
@@ -135,21 +135,21 @@ let rec pp_val out (v : val_) =
   | VTypeLit p -> pp_prim out p
   | VConst c -> pp_const out c
   | VTop (i, sp) -> Format.fprintf out "%s (%s)" i (pp_sp pp_val sp)
-  | VLam (p, cl) -> Format.fprintf out "λ@[<v> %s. {@,%a@]@,}" p pp_closure cl
+  | VLam (p, cl) -> Format.fprintf out "\\@[<v> %s. {@,%a@]@,}" p pp_closure cl
   | VTuple vs ->
     Format.fprintf out "(%a)"
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_val)
       vs
-  | VMatch (c, bs) ->
+  | VMatch (c, _, bs) ->
     let pp_branch out (p, wb, b) =
-      Format.fprintf out "(wh@[<v>en %a)@,(%a) ⇒ %a@]" pp_val wb pp_pattern p
-        pp_val b
+      Format.fprintf out "(wh@[<v>en %a)@,(%a) ⇒ %a@]" pp_tm wb pp_pattern p
+        pp_tm b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_val c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
       bs
   | VPi (n, l, cl) ->
-    Format.fprintf out "(%s : %a) → %a" n pp_val l pp_closure cl
+    Format.fprintf out "(%s : %a) -> %a" n pp_val l pp_closure cl
   | VRigid (i, _, sp) -> Format.fprintf out "%s (%s)" i (pp_sp pp_val sp)
   | VFlex (m, sp) -> Format.fprintf out "?meta%d (%s)" m (pp_sp pp_val sp)
 
@@ -158,18 +158,18 @@ and pp_sp pp_func s =
   let rec go = function
     | Lin -> ""
     | Snoc (Lin, x) -> Format.asprintf "%a" pp_func x
-    | Snoc (xs, x) -> Format.asprintf "%a %s" pp_func x (go xs)
+    | Snoc (xs, x) -> Format.asprintf "%a; %s" pp_func x (go xs)
   in
   go s
 
 and pp_closure out ((env, tm) : closure) =
-  Format.fprintf out "[ @[<v>%s ] ↦@,%a@]" (pp_sp pp_val env) pp_tm tm
+  Format.fprintf out "[ @[<v>%s ] -> @,%a@]" (pp_sp pp_val env) pp_tm tm
 
 (* term → val *)
 let rec to_val (env : env) (tm : tm) : val_ =
   match tm with
   | Local (n, i) ->
-    Log.dbg None (Printf.sprintf "indexing %s with %d into env.\n" n i);
+    Log.dbg None (Format.asprintf "@[<v>indexing %s with %d into env.@,env ↦ [ %s ]@]" n i (pp_sp pp_val env));
     Snoc.nth env i (*NOTE: shouldn't fail unless code is buggy *)
   | TypeLit p -> VTypeLit p
   | Const c -> VConst c
@@ -182,8 +182,7 @@ let rec to_val (env : env) (tm : tm) : val_ =
   | IMv (m, bds) -> v_ap_bds env bds (v_meta m)
   | Match (c, bs) ->
     let c = to_val env c in
-    let bs = List.map (fun (p, wb, b) -> (p, to_val env wb, to_val env b)) bs in
-    VMatch (c, bs)
+    VMatch (c, env, bs)
   | Let (_, _, v, n) -> to_val (env @> to_val env v) n
 
 (*
@@ -191,7 +190,6 @@ let rec to_val (env : env) (tm : tm) : val_ =
 *)
 and ( $$ ) ((env, t) : closure) (v : val_) : val_ = to_val (env @> v) t
 
-(*TODO: migrate to snoc lists for spine and env. would be more performant. *)
 and v_ap l r =
   match l with
   | VLam (_, t) -> t $$ r
@@ -199,7 +197,6 @@ and v_ap l r =
   | VRigid (i, lvl, sp) -> VRigid (i, lvl, sp @> r)
   | VTop (i, sp) -> VTop (i, sp @> r)
   | _ ->
-    Log.dbg None (Format.asprintf "failed → %a@." pp_val l);
     raise
       (Error.InternalError "Internal Error - called `v_ap` on non-function.")
 
@@ -227,7 +224,11 @@ and v_ap_bds env bds m =
 let force = function
   | VFlex (m, sp) as flex -> (
     match lookup_mv m with
-    | Solved v -> v_ap_sp sp v
+    | Solved v -> 
+      Log.dbg None (Format.asprintf "pulled solution from mctx := %a@." pp_val v);
+      let v = v_ap_sp sp v in
+      Log.dbg None (Format.asprintf "vapsp solution from mctx := %a@." pp_val v);
+      v
     | Unsolved -> flex)
   | v -> v
 
@@ -257,9 +258,35 @@ let rec quote (lvl : lvl) (v : val_) : tm =
   | VConst c -> Const c
   | VTop (i, sp) -> quote_sp lvl (Top i) sp
   | VTuple vs -> Tuple (List.map (quote lvl) vs)
-  | VMatch (c, bs) ->
+  | VMatch (c, env, bs) ->
     let c = quote lvl c in
-    let bs = List.map (fun (p, wb, b) -> (p, quote lvl wb, quote lvl b)) bs in
+    let quote_b env (p, wb, b) =
+      let rec build_env env (_, p) l =
+        match p with
+        | PWild | PTypeLit _ | PConst _ -> env, l
+        | PVar i -> (env @> VRigid (i, l, Snoc.empty)), l + 1
+        | PTuple ps ->
+          let ps, l =
+            List.fold_left
+              (fun (sn, l) n -> let sn, l = build_env sn n l in sn, l + 1)
+              (env, l)
+              ps
+          in ps, l
+        | PCtor (_, args) ->
+          let args, l =
+            List.fold_left
+              (fun (sn, l) n -> let sn, l = build_env sn n l in sn, l + 1)
+              (env, l)
+              args
+          in args, l + Snoc.length args
+          (* adding arg length is kinda sus *)
+      in
+      let env, l = build_env env p lvl in
+      let wb = to_val env wb |> quote l in
+      let b = to_val env b |> quote l in
+      p, wb, b
+    in
+    let bs = List.map (quote_b env) bs in
     Match (c, bs)
   | VLam (p, cl) ->
     (*
@@ -356,7 +383,8 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
     | VRigid (i, l, sp) -> (
       match MC.find_opt l p.subs with
       | None ->
-        make_err (Some loc, Printf.sprintf "Variable %s escapes scope." i)
+        Log.dbg None (Format.asprintf "rigid(%d) -> %a@.subs -> %d@." l pp_val (force v) (MC.to_list p.subs |> List.length));
+        make_err (Some loc, Printf.sprintf "Variable '%s' escapes scope." i)
       | Some l -> go_sp p sp (Local (i, to_ix p.gamma l)))
     | VLam (a, cl) ->
       let@ b = go (extend_pn p) (cl $$ VRigid (a, p.delta, Snoc.empty)) in
@@ -365,13 +393,13 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
       let* l = go p l in
       let@ r = go (extend_pn p) (cl $$ VRigid (n, p.delta, Snoc.empty)) in
       Pi (n, l, r)
-    | VMatch (c, bs) ->
+    | VMatch (c, env, bs) ->
       let* c = go p c in
       let@ bs =
         List.map
           (fun (pat, wb, b) ->
-            let* wb = go p wb in
-            let@ b = go p b in
+            let* wb = to_val env wb |> go p in
+            let@ b = to_val env b |> go p in
             (pat, wb, b))
           bs
         |> combine_errors
@@ -398,19 +426,18 @@ let solve (loc : Location.t) (gamma : lvl) (mv : mv) (sp : spine) (rhs : val_) :
     go lvl v 0
   in
   let* p = invert_mapping loc gamma sp in
+  Log.dbg None (Format.asprintf "rhs := %a@." pp_val rhs);
   let@ rhs = rename loc mv p rhs in
   let sol = to_val Snoc.empty @@ nest p.gamma rhs in
   mctx := MC.add mv (Solved sol) !mctx
 
 (* record name, constructor, overall type, field name & type *)
 type record_info = string * string * Ast.located_expr * (string * val_) list
-type ty = string * val_
 
 type ctx = {
   env : env;
   top : top_entry TC.t;
-  tys : ty Snoc.t;
-  records : record_info list;
+  tys : (string * val_) Snoc.t;
   lvl : lvl;
   bds : bd Snoc.t;
 }
@@ -422,6 +449,13 @@ and top_entry = {
 
 and def =
   | Def of tm
+  (* NOTE: 
+     store variants as a None, records as a Some _.
+     check later on (in RCons) that the pulled TCon is a Some _.
+     then do whatever else
+  *)
+  | TCon of (string * val_) list option
+  | DCon of tm (* overall type, constructor func *)
   | Axiom
 
 let empty_ctx () =
@@ -429,7 +463,6 @@ let empty_ctx () =
     env = Snoc.empty;
     top = TC.empty;
     tys = Snoc.empty;
-    records = [];
     lvl = 0;
     bds = Snoc.empty;
   }
@@ -459,6 +492,12 @@ let bind_func ~(id : string) ~(t : val_) (ctx : ctx) =
 
 let define_func ~(id : string) ~(v : tm) ~(t : val_) (ctx : ctx) =
   {ctx with top = TC.add id {ty = t; def = Def v} ctx.top}
+
+let define_dcon ~(id: string) ~(t: val_) ~(v: tm) (ctx : ctx) =
+  {ctx with top = TC.add id {ty = t; def = DCon v} ctx.top}
+
+let define_tcon ~(id: string) ~(t: val_) ~(fields: (string * val_) list option) (ctx: ctx) =
+  {ctx with top = TC.add id {ty = t; def = TCon fields} ctx.top}
 
 let lookup_top (i : string) (ctx : ctx) : (def * val_) option =
   match TC.find_opt i ctx.top with
@@ -504,10 +543,15 @@ let rec unify (loc : Location.t) (ctx : ctx) (l : val_) (r : val_) : unit result
     unify loc (bump_lvl ctx)
       (cl $$ VRigid (p, ctx.lvl, Snoc.empty))
       (v_ap t (VRigid (p, ctx.lvl, Snoc.empty)))
-  | VMatch (c, bs), VMatch (c', bs') when List.length bs = List.length bs' ->
+  | VMatch (c, env, bs), VMatch (c', env', bs') when List.length bs = List.length bs' ->
     (*TODO: unify patterns *)
     let* _ = unify loc ctx c c' in
-    List.map2 (fun (_, _, b) (_, _, b') -> unify loc ctx b b') bs bs'
+    List.map2 
+      (fun (_, _, b) (_, _, b') -> 
+        let b = to_val env b in
+        let b' = to_val env' b' in
+        unify loc ctx b b') 
+      bs bs'
     |> combine_errors_unit
   | VRigid (_, ri, sp), VRigid (_, ri', sp') when ri = ri' ->
     unify_sp ctx sp sp'
@@ -519,11 +563,14 @@ let rec unify (loc : Location.t) (ctx : ctx) (l : val_) (r : val_) : unit result
     | Some (Def b, _) ->
       let b = to_val Snoc.empty b |> v_ap_sp sp in
       unify loc ctx b t
+    | Some (DCon _, t') | Some (TCon _, t') -> 
+      unify loc ctx t' t
     | Some (Axiom, _) ->
       make_err
         (Some loc, Printf.sprintf "The function '%s' has no definition." i))
   | VFlex (mv, sp), VFlex (mv', sp') when mv = mv' -> unify_sp ctx sp sp'
-  | VFlex (mv, sp), t | t, VFlex (mv, sp) -> solve loc ctx.lvl mv sp t
+  | VFlex (mv, sp), t | t, VFlex (mv, sp) -> 
+    solve loc ctx.lvl mv sp t
   | l, r -> uni_err (Some loc) pp_val l r
 
 let fresh_pattern_var () : string = "__p_" ^ (fresh_i () |> string_of_int)
@@ -543,72 +590,6 @@ let replace_pattern ((_, p) : located_pattern)
     in
     (i, match_)
 
-let rec gen_pat_type ((loc, p) : located_pattern) (ctx : ctx) :
-    (val_ * ctx) result =
-  match p with
-  | PConst c ->
-    let t =
-      match c with
-      | Int _ -> PInt
-      | Float _ -> PFloat
-      | String _ -> PString
-      | Char _ -> PChar
-      | Bool _ -> PBool
-      | Unit -> PUnit
-    in
-    ok (VTypeLit t, ctx)
-  | PTypeLit _ -> ok (VTypeLit PUni, ctx)
-  | PWild ->
-    (*NOTE: it might not be right to use ctx.env here? *)
-    let t = to_val ctx.env @@ gen_mv ctx.bds in
-    ok (t, ctx)
-  | PVar id ->
-    let t = to_val ctx.env @@ gen_mv ctx.bds in
-    let ctx = bind_var ~id ~t ctx in
-    ok (t, ctx)
-  | PTuple ps ->
-    let ctx, ts =
-      let rec go ctx acc = function
-        | [] -> (ctx, List.rev acc)
-        | p :: ps -> (
-          match gen_pat_type p ctx with
-          | Error _ as e -> go ctx (e :: acc) ps
-          | Ok (t, ctx) -> go ctx (Ok t :: acc) ps)
-      in
-      go ctx [] ps
-    in
-    let@ ts = combine_errors ts in
-    (VTuple ts, ctx)
-  | PBop (l, op, r) -> (
-    match lookup_top op ctx with
-    | None ->
-      make_err (Some loc, Printf.sprintf "Undefined constructor - '%s'." op)
-    | Some (_, t) ->
-      let* l, ctx = gen_pat_type l ctx in
-      let* r, ctx = gen_pat_type r ctx in
-      let t' = VTop (op, Snoc.of_list [l; r]) in
-      let@ _ = unify loc ctx t t' in
-      (t, ctx))
-  | PCtor (c, ps) -> (
-    match lookup_top c ctx with
-    | None ->
-      make_err (Some loc, Printf.sprintf "Undefined constructor - '%s'." c)
-    | Some (_, t) ->
-      let ctx, ts =
-        let rec go ctx acc = function
-          | [] -> (ctx, List.rev acc)
-          | p :: ps -> (
-            match gen_pat_type p ctx with
-            | Error _ as e -> go ctx (e :: acc) ps
-            | Ok (t, ctx) -> go ctx (Ok t :: acc) ps)
-        in
-        go ctx [] ps
-      in
-      let* ts = combine_errors ts in
-      let t' = VTop (c, Snoc.of_list ts) in
-      let@ _ = unify loc ctx t t' in
-      (t, ctx))
-
 let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     =
   match (e, force ex) with
@@ -622,7 +603,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     let i, b = replace_pattern p b in
     match t with
     | Some t ->
-      let* t = is_type ctx t in
+      let* t, _ = is_type ctx t in
       let vt = to_val ctx.env t in
       let* b = check ctx b vt in
       let@ n = check (define_var ~id:i ~v:(to_val ctx.env b) ~t:vt ctx) n t' in
@@ -643,7 +624,13 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
 
 and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   match e with
-  | Ast.TypeLit p -> ok (TypeLit p, VTypeLit PUni)
+  | Ast.TypeLit p -> 
+    let l =
+      match p with
+      | PUni n -> n + 1
+      | _ -> 0
+    in
+    ok (TypeLit p, VTypeLit (PUni l))
   | Ast.Hole ->
     let t = to_val ctx.env @@ gen_mv ctx.bds in
     let a = gen_mv ctx.bds in
@@ -672,11 +659,8 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   | Ast.Var i -> (
     let i = get_str i in
     match lookup_top i ctx with
-    | Some (_, t) ->
-      let t = force t in
-      Log.dbg None
-        (Format.asprintf "inferred variable %s.@.t := %a@." i pp_val t);
-      ok (Top i, t)
+    | Some (DCon b, t) -> ok (b, t)
+    | Some (_, t) -> ok (Top i, t)
     | None -> (
       let r =
         Snoc.find_mapi
@@ -705,20 +689,22 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
         let@ _ = unify loc ctx (VPi ("x", lt', r')) lt in
         (lt', r')
     in
+    Log.dbg None (Format.asprintf "lt in pi := %a@." pp_val lt);
     let@ r = check ctx r lt in
     Log.dbg None
       (Format.asprintf "ap → %a@.ty → %a@." pp_tm (Ap (b, l, r)) pp_closure ret);
     (Ap (b, l, r), ret $$ to_val ctx.env r)
   | Ast.Pi ((i, _), l, r) ->
-    let* l = is_type ctx l in
+    let* l, n = is_type ctx l in
     let ctx = bind_var ~id:i ~t:(to_val ctx.env l) ctx in
-    let@ r = is_type ctx r in
-    (Pi (i, l, r), VTypeLit PUni)
+    let* r, n' = is_type ctx l in
+    let n = Int.max n n' in
+    (Pi (i, l, r), VTypeLit (PUni n))
   | Ast.Let (p, t, b, n) -> (
     let i, b = replace_pattern p b in
     match t with
     | Some t ->
-      let* t = is_type ctx t in
+      let* t, _ = is_type ctx t in
       (* check that it's actually a type *)
       let vt = to_val ctx.env t in
       let* b = check ctx b vt in
@@ -731,10 +717,29 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
       (Let (i, t, b, n), ty))
   | Ast.Match (c, bs) ->
     (*TODO: check that the type of the pattern matches the type of the condition *)
-    let* c, t = infer ctx c in
-    let check_branch (((ploc, _) as p), wb, ((loc, _) as b)) =
-      let* pt, ctx = gen_pat_type p ctx in
-      let* _ = unify ploc ctx pt t in
+    let* c, _ = infer ctx c in
+    let check_branch (((_, _) as p), wb, ((loc, _) as b)) =
+      let rec add_pat ctx (_, p) =
+        match p with
+        | PWild | PTypeLit _ | PConst _ -> ctx
+        | PVar i -> 
+          let t = to_val ctx.env @@ gen_mv ctx.bds in
+          bind_var ~id:i ~t ctx
+        | PTuple ps ->
+          List.fold_left
+            (fun ctx n -> let ctx = add_pat ctx n in { ctx with lvl = ctx.lvl + 1 })
+            ctx
+            ps
+        | PCtor (_, args) ->
+          let ctx =
+            List.fold_left
+              (fun ctx n -> let ctx = add_pat ctx n in { ctx with lvl = ctx.lvl + 1})
+              ctx
+              args
+          in { ctx with lvl = ctx.lvl + List.length args }
+      in
+      let ctx = add_pat ctx p in
+      Log.dbg None (Format.asprintf "env ⇒ [ %s ]@." (pp_sp pp_val ctx.env));
       let* wb =
         match wb with
         | Some wb -> check ctx wb (VTypeLit PBool)
@@ -799,7 +804,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
           |> combine_errors
         in
         let@ ret =
-          let@ r = is_type ctx overall_t in
+          let@ r, _ = is_type ctx overall_t in
           get_t r |> to_val ctx.env
         in
         let c =
@@ -815,16 +820,15 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
         (cons, ret))
   | e -> Error.todo (Format.asprintf "finish infer - %a" Ast.pp_expr (loc, e))
 
-and is_type (ctx : ctx) (e : Ast.located_expr) : tm result =
-  (* check if it's a type of a type, or a builtin type *)
-  ( ( ( ( ( ( (fun ctx -> check ctx e (VTypeLit PUni)) <|> fun ctx ->
-              check ctx e (VTypeLit PInt) )
-          <|> fun ctx -> check ctx e (VTypeLit PFloat) )
-        <|> fun ctx -> check ctx e (VTypeLit PString) )
-      <|> fun ctx -> check ctx e (VTypeLit PChar) )
-    <|> fun ctx -> check ctx e (VTypeLit PBool) )
-  <|> fun ctx -> check ctx e (VTypeLit PUnit) )
-    ctx
+and infer_universe loc = function
+  | VTypeLit (PUni n) -> ok n
+  | v -> make_err (Some loc, Format.asprintf "Expected a Type, but got %a." pp_val v)
+
+(* check that the given expression is a type, and return the universe level alongside the term *)
+and is_type (ctx : ctx) ((loc, _) as e : Ast.located_expr) : (tm * int) result =
+  let* t, tty = infer ctx e in
+  let@ n = infer_universe loc tty in
+  t, n
 
 let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
     (located_definition list * ctx) result =
@@ -844,7 +848,7 @@ let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
               | _ -> None)
             locals
           |> List.map (fun (i, sig_) ->
-              let@ sig_ = is_type ctx sig_ in
+              let@ sig_, _ = is_type ctx sig_ in
               (i, sig_))
           |> combine_errors
         in
@@ -887,66 +891,93 @@ let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
       | [p] -> (loc, Ast.Lam (p, b))
       | ps -> List.fold_right (fun p acc -> (loc, Ast.Lam (p, acc))) ps b
     in
+    Log.dbg None (Format.asprintf "body ⇒ %a@." Ast.pp_expr b);
     infer ctx' b
   in
   match lookup_top i ctx with
   | None ->
     let ctx = define_func ~id:i ~t ~v:b ctx in
-    let t = quote ctx.lvl t in
+    let t = quote 0 t in
     let d = (loc, (t, i, wb, b)) in
-    ok @@ (d :: locals, ctx)
+    ok (d :: locals, ctx)
   | Some (Axiom, t') ->
     Log.dbg None
       (Format.asprintf "un@[<v>ifying func types.@,Left: %a@,Right: %a@,@]"
          pp_val t' pp_val t);
     let@ _ = unify loc ctx t' t in
     let ctx = define_func ~id:i ~t ~v:b ctx in
-    let t = quote ctx.lvl t' in
+    let t = quote 0 t' in
     let d = (loc, (t, i, wb, b)) in
     (d :: locals, ctx)
   | Some (Def _, _) ->
     make_err
       (Some loc, Printf.sprintf "The function '%s' has already been defined." i)
+  | Some _ ->
+    (* shouldn't occur unless it's an operator. *)
+    make_err
+      (Some loc, Printf.sprintf "The identifier '%s' is already in use." i)
 
 let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
   let ctx = empty_ctx () in
   let* tdecls, ctx =
     let rec check_decls ctx acc ts =
       (* we check fields/variants in the form of string * located_expr. *)
+      let pi_to_lam cons pi =
+        (* 
+            ( × ) : (a : Type) → (b: Type) → Pair a b
+        *)
+        let id_stack = 
+          let rec go pi acc =
+            match pi with
+            | Pi (n, _, r) -> go r (acc @> n)
+            | _ -> acc
+          in
+          go pi Snoc.empty
+        in
+        (* ( × ) a b ⇒ ( × ) 1 0 *)
+        let ap =
+          Snoc.fold_lefti
+            (fun n acc i -> Ap (0, acc, Local (i, n)))
+            (Top cons)
+            id_stack
+        in
+        (* ( × ) 1 0 ⇒ λ λ. ( × ) 1 0 *)
+        let v =
+          Snoc.fold_right
+            (fun i acc -> Lam (i, acc))
+            id_stack
+            ap
+        in Log.dbg None (Format.asprintf "Turned pi into %a@." pp_tm v); v
+      in
       let rec check_assoc ?(bind = false) ctx acc as_ =
         match as_ with
         | [] -> (ctx, List.rev acc)
         | (n, t) :: as_ -> (
           match is_type ctx t with
           | Error _ as e -> check_assoc ctx (e :: acc) as_
-          | Ok t when bind ->
-            let t' = to_val ctx.env t in
-            let ctx = bind_func ~id:n ~t:t' ctx in
+          | Ok (t, _) when bind ->
+            let t' = to_val Snoc.empty t in
+            let v = pi_to_lam n t in
+            let ctx = define_dcon ~id:n ~t:t' ~v ctx in
             check_assoc ctx (Ok (n, t) :: acc) as_
-          | Ok t -> check_assoc ctx (Ok (n, t) :: acc) as_)
+          | Ok (t, _) -> check_assoc ctx (Ok (n, t) :: acc) as_)
       in
       match ts with
       | [] -> (ctx, List.rev acc)
       | (loc, (n, Ast.Alias t)) :: ts -> (
         match is_type ctx t with
         | Error _ as e -> check_decls ctx (e :: acc) ts
-        | Ok v ->
+        | Ok (v, n) ->
           let a = (loc, (n, Alias v)) in
           check_decls
-            (define_func ~id:n ~t:(VTypeLit PUni) ~v ctx)
+            (define_func ~id:n ~t:(VTypeLit (PUni n)) ~v ctx)
             (Ok a :: acc) ts)
       | (loc, (n, Ast.Variant (sig_, vs))) :: ts -> (
         let sig_ = is_type ctx sig_ in
-        (* we bind variants so that they become 'functions' *)
         match sig_ with
         | Error _ as e -> check_decls ctx (e :: acc) ts
-        | Ok sig_ -> (
-          let sig_' = to_val ctx.env sig_ in
-          (*
-             we bind before checking variants to allow reference to the union
-             type in variants i.e. | ( :: ) : (a : Type) -> List a -> List a
-          *)
-          let ctx = bind_func ~id:n ~t:sig_' ctx in
+        | Ok (sig_, _) -> (
+          let ctx = bind_func ~id:n ~t:(to_val Snoc.empty sig_) ctx in
           let ctx, vs = check_assoc ~bind:true ctx [] vs in
           match combine_errors vs with
           | Error _ as e -> check_decls ctx (e :: acc) ts
@@ -958,8 +989,8 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
         let sig_ = is_type ctx sig_'' in
         match sig_ with
         | Error _ as e -> check_decls ctx (e :: acc) ts
-        | Ok sig_ -> (
-          let ctx = bind_func ~id:n ~t:(to_val ctx.env sig_) ctx in
+        | Ok (sig_, _) -> (
+          let ctx = define_tcon ~id:n ~t:(to_val Snoc.empty sig_) ctx in
           let ctx, fs = check_assoc ctx [] fs in
           match combine_errors fs with
           | Error _ as e -> check_decls ctx (e :: acc) ts
@@ -970,12 +1001,12 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
                 sig_ fs
             in
             Log.dbg None (Format.asprintf "csig := %a@." pp_tm csig);
-            let ctx = bind_func ~id:cons ~t:(to_val ctx.env csig) ctx in
+            let ctx = bind_func ~id:cons ~t:(to_val Snoc.empty csig) ctx in
             let r = (loc, (n, Record (cons, sig_, fs))) in
             let ctx =
               (* we hold the record information for checking Ast.RCons and
                  Ast.RUpdate *)
-              let fs = List.map (fun (i, t) -> (i, to_val ctx.env t)) fs in
+              let fs = List.map (fun (i, t) -> (i, to_val Snoc.empty t)) fs in
               {ctx with records = (n, cons, sig_'', fs) :: ctx.records}
             in
             check_decls ctx (Ok r :: acc) ts))
@@ -988,8 +1019,8 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let rec go ctx = function
       | [] -> Ok ctx
       | (i, t) :: ts ->
-        let* t = is_type ctx t in
-        let t' = to_val ctx.env t in
+        let* t, _ = is_type ctx t in
+        let t' = to_val Snoc.empty t in
         Log.dbg None (Format.asprintf "bound %s to %a@." i pp_val t');
         go (bind_func ~id:i ~t:t' ctx) ts
     in

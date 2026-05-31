@@ -343,7 +343,7 @@ module Parser = struct
           in
           let loc = Location.combine s e in
           List.fold_right
-            (fun n acc -> (loc, PBop (n, "::", acc)))
+            (fun n acc -> (loc, PCtor ("::", [n; acc])))
             (List.tl es) (List.hd es) )
           l
       in
@@ -388,7 +388,21 @@ module Parser = struct
     | s, TY_CHAR -> parse_pbop l (s, PTypeLit PChar)
     | s, TY_BOOL -> parse_pbop l (s, PTypeLit PBool)
     | s, TY_UNIT -> parse_pbop l (s, PTypeLit PUnit)
-    | s, TTYPE -> parse_pbop l (s, PTypeLit PUni)
+    | s, TTYPE -> 
+      let* p =
+        ((fun l ->
+            let e = Lexer.current_pos l in
+            let@ n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
+            let loc = Location.combine s e in
+            if n < 0
+            then Lexer.make_err (Some loc, Printf.sprintf "Expected a natural number for universe level, but got '%d'." n)
+            else loc, PTypeLit (PUni n))
+        <|>
+        fun _ ->
+          ok @@ (s, PTypeLit (PUni 0))) (* α : Type ⇒ α : Type 0 *)
+        l
+      in
+      parse_pbop l p
     | pos, tok ->
       Lexer.make_err
         ( Some pos,
@@ -405,8 +419,15 @@ module Parser = struct
             "Expected operator."
         in
         let@ ((e, _) as next) = parse_pattern l in
-        (Location.combine s e, PBop (left, o, next)))
-    <|> fun _ -> ok left )
+        (Location.combine s e, PCtor (o, [left; next])))
+    <|> 
+      (fun l ->
+        let* _ = Lexer.consume l COMMA "Expected comma for a tuple pattern." in
+        let@ ps = Lexer.separated_list l ~sep:COMMA parse_pattern in
+        let e = Lexer.current_pos l in
+        Location.combine s e, PTuple (left :: ps))
+    <|>
+      fun _ -> ok left )
       l
 
   (* https://www.youtube.com/watch?v=2l1Si4gSb9A *)
@@ -438,7 +459,18 @@ module Parser = struct
     | s, TY_CHAR -> ok (s, Ast.TypeLit PChar)
     | s, TY_BOOL -> ok (s, Ast.TypeLit PBool)
     | s, TY_UNIT -> ok (s, Ast.TypeLit PUnit)
-    | s, TTYPE -> ok @@ (s, Ast.TypeLit PUni)
+    | s, TTYPE -> 
+      ((fun l ->
+        let e = Lexer.current_pos l in
+        let@ n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
+        let loc = Location.combine s e in
+        if n < 0
+        then Lexer.make_err (Some loc, Printf.sprintf "Expected a natural number for universe level, but got '%d'." n)
+        else loc, Ast.TypeLit (PUni n))
+      <|>
+      fun _ ->
+        ok @@ (s, Ast.TypeLit (PUni 0))) (* α : Type ⇒ α : Type 0 *)
+      l
     | s, IDENT i -> ok (s, Ast.Var (Ident i))
     | s, UPPER_IDENT i ->
       ( (fun l ->
@@ -561,7 +593,21 @@ module Parser = struct
       | DOT_SEP_IDENT is ->
         let r = (s, Ast.Var (AccessIdent is)) in
         ok @@ Ast.Ap (0, left, r)
-      | TTYPE -> ok @@ Ast.Ap (0, left, (s, Ast.TypeLit PUni))
+      | TTYPE -> 
+        let@ r = 
+          ((fun l ->
+            let e = Lexer.current_pos l in
+            let@ n = Lexer.consume_with l (function INT i -> Some i | _ -> None) "Expected an integer for the universe level." in
+            let loc = Location.combine s e in
+            if n < 0
+            then Lexer.make_err (Some loc, Printf.sprintf "Expected a natural number for universe level, but got '%d'." n)
+            else loc, Ast.TypeLit (PUni n))
+          <|>
+          fun _ ->
+            ok @@ (s, Ast.TypeLit (PUni 0))) (* α : Type ⇒ α : Type 0 *)
+          l
+        in
+        Ast.Ap (0, left, r)
       | LBRACK ->
         let@ r =
           ( (fun l ->

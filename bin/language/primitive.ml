@@ -16,7 +16,6 @@ type const =
   | Bool of bool
   | Unit
 
-(*TODO: add universal hierarchies, where the type of Uₙ is Uₙ₊₁ *)
 type prim =
   | PInt
   | PFloat
@@ -24,7 +23,7 @@ type prim =
   | PChar
   | PBool
   | PUnit
-  | PUni (* A : Type *)
+  | PUni of int (* A : Type n *)
 
 type located_pattern = Location.t * pattern
 
@@ -33,7 +32,6 @@ and pattern =
   | PConst of const
   | PTypeLit of prim
   | PVar of string
-  | PBop of located_pattern * string * located_pattern
   | PCtor of string * located_pattern list
   | PTuple of located_pattern list
 
@@ -64,8 +62,8 @@ let rec prim_equality l r =
   | PString, PString
   | PChar, PChar
   | PBool, PBool
-  | PUnit, PUnit
-  | PUni, PUni -> true
+  | PUnit, PUnit -> true
+  | PUni n, PUni n' -> n = n'
   | _ -> false
 
 and ( #= ) l r = prim_equality l r
@@ -77,7 +75,7 @@ let show_prim = function
   | PChar -> "Char"
   | PBool -> "Bool"
   | PUnit -> "Unit"
-  | PUni -> "U"
+  | PUni n -> Printf.sprintf "U%d" n
 
 (* idents *)
 let get_str = function
@@ -107,12 +105,10 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
   | PTypeLit p -> pp_prim out p
   | PWild -> Format.fprintf out "_"
   | PTuple ps ->
-    Format.fprintf out "(@[<hov>%a@])"
+    Format.fprintf out "(%a)"
       Format.(
         pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_pattern)
       ps
-  | PBop (l, cons, r) ->
-    Format.fprintf out "(%s @[<hov>%a %a@])" cons pp_pattern l pp_pattern r
   | PCtor (i, v) ->
     Format.fprintf out "(%s %a)" i
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)

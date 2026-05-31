@@ -22,7 +22,7 @@ type prim =
   | PChar
   | PBool
   | PUnit
-  | PUni
+  | PUni of int
 
 type located_pattern = Location.t * pattern
 
@@ -31,7 +31,6 @@ and pattern =
   | PConst of const
   | PTypeLit of prim
   | PVar of string
-  | PBop of located_pattern * string * located_pattern
   | PCtor of string * located_pattern list
   | PTuple of located_pattern list
 
