@@ -23,8 +23,11 @@
 - [ ] Add meta variables and solving of them to allow for inference of typed holes.
   - [x] Typecheck functions with arguments
   - [ ] Properly typecheck match cases (compare patterns to condition type).
+    - [ ] Implement the algorithm explained in [this paper](https://jesper.sikanda.be/files/elaborating-dependent-copattern-matching.pdf).
   - [ ] Properly typecheck record update syntax.
+    - [ ] Decide on whether the language uses haskell field access (`y x`) or typical field access (`x.y`).
   - [ ] Make sure that aliases, unions and records actually work.
   - [x] Add a pass over functions/expressions to ensure that there aren't any typed holes.
 - [ ] Make implicit arguments work properly.
-- [ ] Migrate to an error enum, and use `Base.Result` with it so that I can better render lists of errors.
+- [x] ~Migrate to an error enum, and use `Base.Result` with it so that I can better render lists of errors~.
+      Move to logging errors to the console and using `Base.Option` to signal failure/success.
