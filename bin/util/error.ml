@@ -4,6 +4,7 @@ exception InternalError of string
 exception Todo of string
 
 let todo m = raise (Todo m)
+let internal m = raise (InternalError m)
 
 let pp_err out ((loc, msg) : t) =
   match loc with

@@ -62,6 +62,7 @@ and token =
   | ARROW
   | F_ARROW
   | ATSIGN
+  | RECORD_FUN
   | DOT
   | COMMA
   | WILDCARD
@@ -129,6 +130,7 @@ let show (t : token) : string =
   | ARROW -> "ARROW"
   | F_ARROW -> "F_ARROW"
   | ATSIGN -> "ATSIGN"
+  | RECORD_FUN -> "RECORD_FUN"
   | DOT -> "DOT"
   | COMMA -> "COMMA"
   | WILDCARD -> "WILDCARD"

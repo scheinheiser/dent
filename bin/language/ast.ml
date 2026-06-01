@@ -23,12 +23,15 @@ and expr =
   | Pi of bind * located_expr * located_expr
   | RCons of
       string * (string * located_expr) list (* cons { x₁ = y₁; ...; xₙ = yₙ } *)
-  | RUpdate of
-      string
-      * (string * located_expr) list (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
+  | RUpdate of string * (update_type * string * located_expr) list
+    (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
 
 and bind = string * bool (* identifier, is implicit? *)
+
+and update_type =
+  | Val (* { x where y₁ := z₁ } *)
+  | Func (* { x where y₁ =@ z₁ } - z₁ must be a function. *)
 
 type located_ty_decl = Location.t * ty_decl
 and ty_decl = string * tdecl_type
@@ -106,9 +109,16 @@ let rec pp_expr out ((_, e) : located_expr) =
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "; @,") pp_field)
       fields
   | RUpdate (i, fields) ->
-    let pp_field out (i, v) = Format.fprintf out "%s = %a" i pp_expr v in
+    let pp_field out (upd, i, v) =
+      let assgn =
+        match upd with
+        | Val -> ":="
+        | Func -> "=@"
+      in
+      Format.fprintf out "%s %s %a" i assgn pp_expr v
+    in
     Format.fprintf out "{%s wh@[ere@,%a@]}" i
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ";@,") pp_field)
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "; ") pp_field)
       fields
   | Hole -> Format.fprintf out "_"
 

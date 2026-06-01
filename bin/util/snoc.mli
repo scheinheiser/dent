@@ -27,7 +27,10 @@ val map : ('a -> 'b) -> 'a t -> 'b t
 
 (* folding operations *)
 val fold_left : ('acc -> 'a -> 'acc) -> 'acc -> 'a t -> 'acc
-val fold_lefti : (int -> 'acc -> 'a -> 'acc) -> 'acc -> 'a t -> 'acc (* fold with an index *)
+
+val fold_lefti :
+  (int -> 'acc -> 'a -> 'acc) -> 'acc -> 'a t -> 'acc (* fold with an index *)
+
 val fold_right : ('a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
 
 (* find_map that carries an index for each element in list *)

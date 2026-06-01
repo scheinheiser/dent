@@ -67,6 +67,7 @@ let builtin_symbol =
     ("→", ARROW);
     ("→", ARROW);
     ("@", ATSIGN);
+    ("=@", RECORD_FUN);
     ("|", PIPE);
   ]
 

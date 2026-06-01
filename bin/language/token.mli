@@ -62,6 +62,7 @@ and token =
   | ARROW
   | F_ARROW
   | ATSIGN
+  | RECORD_FUN
   | DOT
   | COMMA
   | WILDCARD

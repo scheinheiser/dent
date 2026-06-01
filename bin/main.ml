@@ -15,6 +15,7 @@ let () =
     border ();
     let res = Elab.check_program res in
     match res with
-    | Error e -> print_endline (Base.Error.to_string_hum e)
-    | Ok res -> Elab.pp_program Format.std_formatter res)
-  | Error e -> print_endline (Base.Error.to_string_hum e)
+    | None -> ()
+    | Some res -> Elab.pp_program Format.std_formatter res)
+  | Error e -> Base.Error.pp Format.std_formatter e
+(* print_endline (Base.Error.to_string_hum e) *)

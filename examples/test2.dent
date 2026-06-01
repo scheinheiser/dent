@@ -1,9 +1,9 @@
 module T
 
 (* ALIAS TESTS - WORKING *)
+(*
 alias Boolean := Bool
 
-(*
 dec chooseType : Boolean → Type
 def chooseType b :=
   match true to
@@ -20,25 +20,31 @@ data Pair : Type → Type → Type =
   ( × ) : (a, b : Type) → Pair a b
 
 dec fst : (a, b : Type) → Pair a b → a
-def fst := λ a b (x × y) → x
+def fst := λ _ _ (x × _) → x
 
 dec snd : (a, b : Type) → Pair a b -> a
-def snd := λ a b (_ × y) → y
+def snd := λ _ _ (_ × y) → y
 
 dec swap : (a, b : Type) → Pair a b → Pair b a
-def swap := λ a b (x × y) → y × x
+def swap := λ _ _ (x × y) → y × x
 
 dec map : (a, b, c : Type) → (b → c) → Pair a b → Pair a c
 def map := λ a b c f (x × y) → x × f y
 *)
 
 (* RECORD TESTS *)
+(*
 record Point : Type =
   constructor MkPoint
   | x : Int
   | y : Int
-  | bing : Boolean
 
-dec point : Point
-(*def point := MkPoint { y := 20; bing := true; x := 10 }*)
-def point := MkPoint 20 10 true
+dec point : Int → Int → Point
+def point x y := MkPoint { x; y } (* record punning *)
+
+dec incX : Int → Point → Point
+def incX n p := { p where x := p.x + n }
+
+dec incY : Int → Point → Point
+def incY n p := { p where y =@ (+ n) } (* field function application *)
+*)

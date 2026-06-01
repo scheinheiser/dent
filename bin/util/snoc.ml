@@ -38,16 +38,17 @@ let flatten s =
   let rec go s =
     match s with
     | Lin -> Lin
-    | Snoc (xs, x) ->
-      x <@ go xs 
-  in go s
+    | Snoc (xs, x) -> x <@ go xs
+  in
+  go s
 
 let reverse s =
   let rec go s acc =
     match s with
     | Lin -> acc
     | Snoc (xs, x) -> go xs (acc @> x)
-  in go s empty
+  in
+  go s empty
 
 let of_list l =
   let rec go l acc =
@@ -65,7 +66,7 @@ let to_list s =
   in
   go s []
 
-let rec map f  = function
+let rec map f = function
   | Lin -> Lin
   | Snoc (r, v) -> map f r @> f v
 
@@ -76,9 +77,10 @@ let rec fold_left f acc s =
 
 let fold_lefti f acc s =
   let rec go f acc n = function
-     | Lin -> acc
-     | Snoc (r, v) -> f n (go f acc (n + 1) r) v
-  in go f acc 0 s
+    | Lin -> acc
+    | Snoc (r, v) -> f n (go f acc (n + 1) r) v
+  in
+  go f acc 0 s
 
 let rec fold_right f s acc =
   match s with

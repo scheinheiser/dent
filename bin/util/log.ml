@@ -31,9 +31,9 @@ let fmt_warn loc msg =
 let fmt_error loc msg =
   match loc with
   | Some l ->
-    Format.asprintf "@[<v 2>%a@,\x1b[1;91m@[<v>[ERROR]\x1b[0m:%s@]@]"
+    Format.asprintf "%a:@.@[<v 4>  \x1b[1;91m[ERROR]\x1b[0m:@,%s@]"
       Location.pp_location l msg
-  | None -> Format.asprintf "\x1b[1;91m@[<v>[ERROR]\x1b[0m:@,%s@]" msg
+  | None -> Format.asprintf "@[<v 2>\x1b[1;91m[ERROR]\x1b[0m:@,%s@]" msg
 
 let log s =
   let msg =
