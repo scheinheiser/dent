@@ -372,7 +372,7 @@ module Parser = struct
       ( (fun l ->
           let* ((e, _) as v) = parse_pattern l in
           parse_pbop l (Location.combine s e, PCtor (i, [v])))
-      <|> fun _ -> parse_pbop l (s, PVar i) )
+      <|> fun _ -> parse_pbop l (s, PCtor i, []) )
         l
     | s, INT i -> parse_pbop l (s, PConst (Int i))
     | s, FLOAT i -> parse_pbop l (s, PConst (Float i))

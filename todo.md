@@ -6,6 +6,8 @@
 - [x] Mutiple arguments in a single binding (i.e. `(a, b, c : Type)`)
 - [x] Properly desugar record constructors.
 - [ ] Consider pattern synonyms? like in haskell.
+- [ ] Add type annotations - `10 ~ Nat`.
+- [ ] Add as patterns - either `x@y` or `y as x`, where y is some pattern.
 
 ## Diagnostics
 - [x] Make a logging library

@@ -1,6 +1,6 @@
 module T
 
-dec tup : Int, Bool, String
+dec tup : (Int, Bool, Bool)
 def tup := (10, true, "hi")
 
 (* ALIAS TESTS - WORKING *)

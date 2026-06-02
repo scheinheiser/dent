@@ -1,0 +1,89 @@
+module Match
+
+union Boolean : Type =
+  | True : Boolean
+  | False : Boolean
+
+dec ( ∧ ) : Boolean → Boolean → Boolean
+def ( ∧ ) False r := False
+def ( ∧ ) l False := False
+def ( ∧ ) _ _ := True
+
+(*
+
+1
+we introduce a variable to make constraints of the first argument and clauses of each branch:
+def ( ∧ ) [ m / False ] r := False
+def ( ∧ ) [ m / l ] False := False
+def ( ∧ ) [ m / _ ] _     := True
+
+2
+then we get all possible constructors for m based on the type of the constraint's pattern.
+we split the overall problem into 2 (Boolean has 2 constructors) separate problems:
+P₁:
+  def ( ∧ ) [ False / False ] r := False
+  def ( ∧ ) [ False / l ] False := False
+  def ( ∧ ) [ False / _ ] _     := True
+
+P₂:
+  def ( ∧ ) [ True / False ] r := False
+  def ( ∧ ) [ True / l ] False := False
+  def ( ∧ ) [ True / _ ] _     := True
+
+3
+we then prune clauses with impossible constraints, such as a [ True / False ] case; it can't be equated.
+we also remove any constraints that can be solved with simple equality, like [ True / True ]:
+P₁:
+  def ( ∧ )       _          r  := False -- assuming that we can turn any [ x / x ] case into a _.
+  def ( ∧ ) [ False / l ] False := False
+  def ( ∧ )       _           _ := True  -- assuming that we can simplify a [ x / _ ] through turning it back into a _.
+
+P₂:
+  def ( ∧ ) [ True / l ] False := False
+  def ( ∧ )       _          _ := True
+
+4
+we then repeat steps 1-3 for the next argument in the function:
+P₃:
+  def ( ∧ )       _           [ n / r ] := False
+  def ( ∧ ) [ False / l ] [ n / False ] := False
+  def ( ∧ )       _           [ n / _ ] := True 
+
+P₄:
+  def ( ∧ ) [ True / l ] [ n / False ] := False
+  def ( ∧ )       _          [ n / _ ] := True
+
+-----------------------------------------------------
+-- simplification + pruning
+P₅:
+  def ( ∧ )      _            [ False / r ] := False
+  def ( ∧ ) [ False / l ]                   := False
+  def ( ∧ )      _                 _        := True
+
+P₆:
+  def ( ∧ )      _            [ True / r ] := False
+  def ( ∧ )      _                  _      := True
+
+P₇:
+  def ( ∧ ) [ True / l ]         _         := False
+  def ( ∧ )      _               _         := True
+
+P₈:
+  def ( ∧ )      _               _         := True
+
+5
+I'm not really sure about the specific things done here (the paper is kind vague), but I see it as:
+We use the simplified cases and the initial stuff to make a complete case tree for the function.
+NOTE: idk if it'd need to have repeated application like this? 
+      maybe we could take the initial declaration of the function that matches on args and turn it into a match on a tuple or something?
+      like this:
+        def ( ∧ ) :=
+          λ m.
+            λ n.
+              match (m, n) to
+              | (False, r) ⇒ False
+              | (l, False) ⇒ False
+              | (_, _)     ⇒ True
+
+      this'd also mean less work in the implementation.
+*)
