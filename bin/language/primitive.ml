@@ -33,7 +33,7 @@ and pattern =
   | PTypeLit of prim
   | PVar of string
   | PCtor of string * located_pattern list
-  | PTuple of located_pattern list
+  | PTuple of located_pattern * located_pattern
 
 type located_import = Location.t * import
 and import = ident * import_cond option
@@ -104,11 +104,8 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
   | PConst c -> pp_const out c
   | PTypeLit p -> pp_prim out p
   | PWild -> Format.fprintf out "_"
-  | PTuple ps ->
-    Format.fprintf out "(%a)"
-      Format.(
-        pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_pattern)
-      ps
+  | PTuple (l, r) ->
+    Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
   | PCtor (i, v) ->
     Format.fprintf out "(%s %a)" i
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)

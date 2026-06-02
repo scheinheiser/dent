@@ -32,7 +32,7 @@ type tm =
   | Ap of binder * tm * tm
   | Mv of mv
   | IMv of mv * bd Snoc.t (* generated mv *)
-  | Tuple of tm list
+  | Tuple of tm * tm
   | Let of string * tm * tm * tm (* let p₁ ... pₙ : type = e₁ in e₂ *)
   | Match of tm * (located_pattern * tm * tm) list
     (* match cond to | p₁ when x₁ => y₁ ... | pₙ when xₙ => yₙ*)
@@ -47,7 +47,7 @@ and val_ =
   | VTop of string * spine
   | VLocal of string * lvl * spine
   | VMeta of mv * spine
-  | VTuple of val_ list
+  | VTuple of val_ * val_
   | VMatch of val_ * env * (located_pattern * tm * tm) list
   | VPi of string * val_ * closure
   | VTypeLit of prim
@@ -98,10 +98,8 @@ let rec pp_tm out (tm : tm) =
   | TypeLit p -> pp_prim out p
   | Ap (_, f, arg) ->
     Format.fprintf out "(@[<hov>%a@ %@ %a@])" pp_tm f pp_tm arg
-  | Tuple t ->
-    Format.fprintf out "(@[<hov>%a@])"
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_tm)
-      t
+  | Tuple (l, r) ->
+    Format.fprintf out "(%a, %a)" pp_tm l pp_tm r
   | Let (p, ty, v, n) ->
     Format.fprintf out "@[<v 2>let %s : %a =@,%a@]@,in@,%a" p pp_tm ty pp_tm v
       pp_tm n
@@ -134,10 +132,7 @@ let rec pp_val out (v : val_) =
   | VConst c -> pp_const out c
   | VTop (i, sp) -> Format.fprintf out "%s (%s)" i (pp_sp pp_val sp)
   | VLam (p, cl) -> Format.fprintf out "\\@[<v> %s. {@,%a@]@,}" p pp_closure cl
-  | VTuple vs ->
-    Format.fprintf out "(%a)"
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_val)
-      vs
+  | VTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_val l pp_val r
   | VMatch (c, _, bs) ->
     let pp_branch out (p, wb, b) =
       Format.fprintf out "(wh@[<v>en %a)@,(%a) ⇒ %a@]" pp_tm wb pp_pattern p
@@ -212,7 +207,7 @@ let rec to_val (env : env) (tm : tm) : val_ =
   | TypeLit p -> VTypeLit p
   | Const c -> VConst c
   | Top i -> VTop (i, Snoc.empty)
-  | Tuple ts -> VTuple (List.map (to_val env) ts)
+  | Tuple (l, r) -> VTuple (to_val env l, to_val env r)
   | Lam (p, t) -> VLam (p, (env, t))
   | Pi (n, l, r) -> VPi (n, to_val env l, (env, r))
   | Ap (_, l, r) -> v_ap (to_val env l) (to_val env r)
@@ -295,7 +290,7 @@ let rec quote (lvl : lvl) (v : val_) : tm =
   | VTypeLit t -> TypeLit t
   | VConst c -> Const c
   | VTop (i, sp) -> quote_sp lvl (Top i) sp
-  | VTuple vs -> Tuple (List.map (quote lvl) vs)
+  | VTuple (l, r) -> Tuple (quote lvl l, quote lvl r)
   | VMatch (c, env, bs) ->
     let c = quote lvl c in
     let quote_b env (p, wb, b) =
@@ -303,15 +298,9 @@ let rec quote (lvl : lvl) (v : val_) : tm =
         match p with
         | PWild | PTypeLit _ | PConst _ -> (env, l)
         | PVar i -> (env @> VLocal (i, l, Snoc.empty), l + 1)
-        | PTuple ps ->
-          let ps, l =
-            List.fold_left
-              (fun (sn, l) n ->
-                let sn, l = build_env sn n l in
-                (sn, l + 1))
-              (env, l) ps
-          in
-          (ps, l)
+        | PTuple (l', r) ->
+          let env, l = build_env env l' l in
+          build_env env r l
         | PCtor (_, args) ->
           let args, l =
             List.fold_left
@@ -348,6 +337,11 @@ and quote_sp (lvl : lvl) (v : tm) (sp : spine) : tm =
   match sp with
   | Snoc.Lin -> v
   | Snoc.Snoc (sp, s) -> Ap (0, quote_sp lvl v sp, quote lvl s)
+
+(* case analysis *)
+(* type constr = string * located_pattern * val_ *)
+(* and clause = constr * val_ *)
+(* and problem = clause list * val_ *)
 
 (* type checking *)
 type 'a result = 'a Base.Option.t
@@ -444,9 +438,10 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
         |> combine_errors
       in
       Match (c, bs)
-    | VTuple vs ->
-      let@ vs = List.map (go p) vs |> combine_errors in
-      Tuple vs
+    | VTuple (l, r) ->
+      let* l = go p l in
+      let@ r = go p r in
+      Tuple (l, r)
     | VConst c -> ok @@ Const c
     | VTypeLit p -> ok @@ TypeLit p
     | VTop (i, sp) -> go_sp p sp (Top i)
@@ -563,6 +558,9 @@ let rec unify (loc : Location.t) (ctx : ctx) (l : val_) (r : val_) : unit result
   match (force l, force r) with
   | VTypeLit l, VTypeLit r when l#=r -> ok ()
   | VConst l, VConst r when l %= r -> ok ()
+  | VTuple (l, r), VTuple (l', r') ->
+    let* _ = unify loc ctx l l' in
+    unify loc ctx r r'
   | VPi (n, l, cl), VPi (n', l', cl') ->
     (* go into the closure and check that the bound variables are equal *)
     let* _ = unify loc ctx l l' in
@@ -679,10 +677,10 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
       | Unit -> PUnit
     in
     ok (Const c, VTypeLit t)
-  | Ast.Tuple es ->
-    let@ ets = List.map (infer ctx) es |> combine_errors in
-    let es, ts = List.split ets in
-    (Tuple es, VTuple ts)
+  | Ast.Tuple (l, r) ->
+    let* l, lt = infer ctx l in
+    let@ r, rt = infer ctx r in
+    (Tuple (l, r), VTuple (lt, rt))
   | Ast.If (c, t, f) ->
     let t = ((loc, PConst (Bool true)), None, t) in
     let f = ((loc, PConst (Bool false)), None, f) in
@@ -760,31 +758,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   | Ast.Match (c, bs) ->
     (*TODO: check that the type of the pattern matches the type of the condition *)
     let* c, _ = infer ctx c in
-    let check_branch (((_, _) as p), wb, ((loc, _) as b)) =
-      let rec add_pat ctx (_, p) =
-        match p with
-        | PWild | PTypeLit _ | PConst _ -> ctx
-        | PVar i ->
-          let t = to_val ctx.env @@ gen_mv ctx.bds in
-          bind_var ~id:i ~t ctx
-        | PTuple ps ->
-          List.fold_left
-            (fun ctx n ->
-              let ctx = add_pat ctx n in
-              {ctx with lvl = ctx.lvl + 1})
-            ctx ps
-        | PCtor (x, args) ->
-          let ctx =
-            List.fold_left
-              (fun ctx n ->
-                let ctx = add_pat ctx n in
-                {ctx with lvl = ctx.lvl + 1})
-              ctx args
-          in
-          Log.dbg None (Printf.sprintf "ctor (%s) ⇒ level %d" x (ctx.lvl + List.length args));
-          { ctx with lvl = ctx.lvl + List.length args }
-      in
-      let ctx = add_pat ctx p in
+    let check_branch (p, wb, ((loc, _) as b)) =
       Log.dbg None (Format.asprintf "after adding pat env ⇒ [ %s ]@." (pp_sp pp_val ctx.env));
       let* wb =
         match wb with
@@ -853,6 +827,10 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
 and infer_universe loc = function
   | VTypeLit (PUni n) -> ok n
   | VMeta _ -> ok 0
+  | VTuple (l, r) ->
+    let* n = infer_universe loc l in
+    let@ n' = infer_universe loc r in
+    Int.max n n'
   | v -> err (Some loc, Format.asprintf "Expected a Type, but got %a." pp_val v)
 
 and is_type (ctx : ctx) ((loc, _) as e : Ast.located_expr) : (tm * int) result =

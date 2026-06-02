@@ -5,7 +5,7 @@ open Primitive
 type located_expr = Location.t * expr
 
 and expr =
-  | Tuple of located_expr list
+  | Tuple of located_expr * located_expr
   | Ap of binder * located_expr * located_expr
   (* we give each function a binder to distinguish between user-defined
      functions and builtins later on *)

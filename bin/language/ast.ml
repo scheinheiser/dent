@@ -4,7 +4,7 @@ open Primitive
 type located_expr = Location.t * expr
 
 and expr =
-  | Tuple of located_expr list
+  | Tuple of located_expr * located_expr
   | Ap of binder * located_expr * located_expr
   (* we give each function a binder to distinguish between user-defined
      functions and builtins later on *)
@@ -70,10 +70,8 @@ let rec pp_expr out ((_, e) : located_expr) =
   match e with
   | Var i -> pp_ident out i
   | Const c -> pp_const out c
-  | Tuple t ->
-    Format.fprintf out "(@[<hov>%a@])"
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ",@ ") pp_expr)
-      t
+  | Tuple (l, r) ->
+    Format.fprintf out "(%a, %a)" pp_expr l pp_expr r
   | Ap (_, f, arg) ->
     Format.fprintf out "(@[<hov>%a@ %@ %a@])" pp_expr f pp_expr arg
   | Let (p, ty, v, n) ->

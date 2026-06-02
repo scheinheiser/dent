@@ -1,5 +1,8 @@
 module T
 
+dec tup : Int, Bool, String
+def tup := (10, true, "hi")
+
 (* ALIAS TESTS - WORKING *)
 (*
 alias Boolean := Bool

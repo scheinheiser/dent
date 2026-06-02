@@ -19,18 +19,18 @@ let pp_location out loc =
   let {filename; start_line; end_line; start_col; end_col} = loc in
   let line =
     if start_line = end_line then
-      Printf.sprintf "%d" start_line
+      Printf.sprintf "line %d" start_line
     else
-      Printf.sprintf "%d-%d" start_line end_line
+      Printf.sprintf "lines %d-%d" start_line end_line
   in
   let col =
     if start_col = end_col then
-      Printf.sprintf "%d" start_col
+      Printf.sprintf "char %d" start_col
     else
-      Printf.sprintf "%d-%d" start_col end_col
+      Printf.sprintf "chars %d-%d" start_col end_col
   in
   let filename = if filename = "" then "<unnamed>" else filename in
-  Format.fprintf out "%s; ln %s, chars %s" filename line col
+  Format.fprintf out "%s; %s, %s" filename line col
 
 let of_lexbuf lexbuf =
   let start = Sedlexing.lexing_position_start lexbuf in

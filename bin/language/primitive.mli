@@ -32,7 +32,7 @@ and pattern =
   | PTypeLit of prim
   | PVar of string
   | PCtor of string * located_pattern list
-  | PTuple of located_pattern list
+  | PTuple of located_pattern * located_pattern
 
 type located_import = Location.t * import
 and import = ident * import_cond option

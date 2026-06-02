@@ -241,7 +241,7 @@ module Parser = struct
   let get_bp (t : Token.token) (om : operator_map) : int =
     match t with
     (* the parser will fail without this in cases like `f (g x)` *)
-    | LPAREN | LBRACK | ARROW -> 1
+    | LPAREN | LBRACK | ARROW | COMMA -> 1
     | OP op -> (
       match List.assoc_opt op builtin_ops with
       | Some (p, _) -> p
@@ -432,9 +432,8 @@ module Parser = struct
           (Location.combine s e, PCtor (o, [left; next])))
       <|> fun l ->
         let* _ = Lexer.consume l COMMA "Expected comma for a tuple pattern." in
-        let@ ps = Lexer.separated_list l ~sep:COMMA parse_pattern in
-        let e = Lexer.current_pos l in
-        (Location.combine s e, PTuple (left :: ps)) )
+        let@ (e, _) as r = parse_pattern l in
+        (Location.combine s e, PTuple (left, r)) )
     <|> fun _ -> ok left )
       l
 
@@ -539,21 +538,11 @@ module Parser = struct
             (loc, Ast.Var (Ident o)))
         <|> fun l -> parse_binding l ~is_imp:false s om )
       <|> fun l ->
-        let* loc, expr = parse_expr l 0 om in
+        let* _, expr= parse_expr l 0 om in
         match Lexer.current l with
         | e, RPAREN ->
           Lexer.skip ~am:1 l;
           ok (Location.combine s e, expr)
-        | _, COMMA ->
-          Lexer.skip ~am:1 l;
-          let* es =
-            Lexer.separated_list l ~sep:COMMA (fun l -> parse_expr l 0 om)
-          in
-          let@ e =
-            Lexer.consume_with_pos l RPAREN
-              "Expected ')' to end tuple expression."
-          in
-          (Location.combine s e, Ast.Tuple ((loc, expr) :: es))
         | pos, tok ->
           Lexer.make_err
             ( Some pos,
@@ -583,6 +572,9 @@ module Parser = struct
       | ARROW ->
         let@ r = parse_expr l 0 om in
         Ast.Pi (("_", false), left, r)
+      | COMMA ->
+        let@ r = parse_expr l 0 om in
+        Ast.Tuple (left, r)
       | WILDCARD -> ok (Ast.Ap (0, left, (s, Ast.Hole)))
       | INT i -> ok (Ast.Ap (0, left, (s, Ast.Const (Int i))))
       | FLOAT f -> ok (Ast.Ap (0, left, (s, Ast.Const (Float f))))
@@ -687,22 +679,11 @@ module Parser = struct
             let@ r = parse_binding ~is_imp:false l s om in
             Ast.Ap (0, left, r) )
         <|> fun l ->
-          let* loc, expr = parse_expr l 0 om in
+          let* _, expr = parse_expr l 0 om in
           match Lexer.current l with
           | e, RPAREN ->
             Lexer.skip ~am:1 l;
             ok @@ Ast.Ap (0, left, (Location.combine s e, expr))
-          | _, COMMA ->
-            Lexer.skip ~am:1 l;
-            let* es =
-              Lexer.separated_list l ~sep:COMMA (fun l -> parse_expr l 0 om)
-            in
-            let@ e =
-              Lexer.consume_with_pos l RPAREN
-                "Expected ')' to end tuple expression."
-            in
-            Ast.Ap
-              (0, left, (Location.combine s e, Ast.Tuple ((loc, expr) :: es)))
           | pos, tok ->
             Lexer.make_err
               ( Some pos,
