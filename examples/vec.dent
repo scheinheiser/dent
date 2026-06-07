@@ -1,0 +1,10 @@
+module Vector
+
+import Nat
+
+data Vec : (n: Nat) → (a: U) → U =
+  | Nil    : ∀ a. Vec Z a
+  | ( @: ) : ∀ (n ~ Nat) a. a → Vec n a → Vec (S n) a
+
+dec empty : ∀ a. Vec Z a
+def empty := Nil

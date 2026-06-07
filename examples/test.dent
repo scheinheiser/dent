@@ -1,7 +1,7 @@
 module Testing
 
 (* WORKING *)
-dec chooseType : Type
+dec chooseType : U
 def chooseType :=
   match true to
   | true => Int
@@ -42,13 +42,13 @@ def ( ∨ ) l r :=
 (* WORKING (with both the hole or binary expressions) *)
 dec aBool : Bool
 def aBool :=
-  let α : Bool = ¬ true in
-  let β : Bool = true ∧ false in
+  let α := ¬ true in
+  let β := true ∧ false in
   (*β ∧ (¬ α)*)
   _
 
 (* WORKING *)
-dec id : (a : Type) → a → a
+dec id : (a : U) → a → a
 def id _ x := x
 
 (* WORKING *)
@@ -56,7 +56,7 @@ dec nId : Int
 def nId := id Int 10
 
 (* WORKING *)
-dec const : (a, b : Type) → a → b → a
+dec const : (a, b : U) → a → b → a
 def const a b x y := x
 
 (* WORKING *)

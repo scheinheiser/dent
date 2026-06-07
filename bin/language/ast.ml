@@ -26,12 +26,13 @@ and expr =
   | RUpdate of string * (update_type * string * located_expr) list
     (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
+  | Annot of located_expr * located_expr (* e ~ t *)
 
-and bind = string * bool (* identifier, is implicit? *)
+and bind = string * icit (* identifier, icit type *)
 
 and update_type =
-  | Val (* { x where y₁ := z₁ } *)
-  | Func (* { x where y₁ =@ z₁ } - z₁ must be a function. *)
+  | Assign (* { x where y₁ := z₁ } *)
+  | Apply (* { x where y₁ =@ z₁ } - z₁ must be a function. *)
 
 type located_ty_decl = Location.t * ty_decl
 and ty_decl = string * tdecl_type
@@ -70,12 +71,11 @@ let rec pp_expr out ((_, e) : located_expr) =
   match e with
   | Var i -> pp_ident out i
   | Const c -> pp_const out c
-  | Tuple (l, r) ->
-    Format.fprintf out "(%a, %a)" pp_expr l pp_expr r
+  | Tuple (l, r) -> Format.fprintf out "(%a, %a)" pp_expr l pp_expr r
   | Ap (_, f, arg) ->
     Format.fprintf out "(@[<hov>%a@ %@ %a@])" pp_expr f pp_expr arg
   | Let (p, ty, v, n) ->
-    Format.fprintf out "@[<v>@[<hov>let %a@ = %a@ %a in@]@,%a@]" pp_pattern p
+    Format.fprintf out "@[<v>@[<hov>let %a : %a = %a in@]@,%a@]" pp_pattern p
       Format.(
         pp_print_option ~none:(fun out () -> fprintf out "<none>") pp_expr)
       ty pp_expr v pp_expr n
@@ -96,8 +96,8 @@ let rec pp_expr out ((_, e) : located_expr) =
   | Pi (b, l, r) ->
     let l =
       match b with
-      | x, false -> Format.asprintf "(%s : %a)" x pp_expr l
-      | x, true -> Format.asprintf "{%s : %a}" x pp_expr l
+      | x, Exp -> Format.asprintf "(%s : %a)" x pp_expr l
+      | x, Imp -> Format.asprintf "{%s : %a}" x pp_expr l
     in
     Format.fprintf out "%s -> %a" l pp_expr r
   | TypeLit p -> Format.fprintf out "%a" pp_prim p
@@ -110,15 +110,16 @@ let rec pp_expr out ((_, e) : located_expr) =
     let pp_field out (upd, i, v) =
       let assgn =
         match upd with
-        | Val -> ":="
-        | Func -> "=@"
+        | Assign -> ":="
+        | Apply -> "=@"
       in
       Format.fprintf out "%s %s %a" i assgn pp_expr v
     in
-    Format.fprintf out "{%s wh@[ere@,%a@]}" i
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "; ") pp_field)
+    Format.fprintf out "{ %s where %a }" i
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ";@,") pp_field)
       fields
   | Hole -> Format.fprintf out "_"
+  | Annot (e, t) -> Format.fprintf out "(%a ~ %a)" pp_expr e pp_expr t
 
 let rec pp_ty_decl out ((_, (i, t)) : located_ty_decl) =
   match t with
@@ -127,7 +128,7 @@ let rec pp_ty_decl out ((_, (i, t)) : located_ty_decl) =
 
 and pp_tdecl_type out (t : tdecl_type) =
   let pp_field out ((i, t) : string * located_expr) =
-    Format.fprintf out "(%s %a)" i pp_expr t
+    Format.fprintf out "(%s ~ %a)" i pp_expr t
   in
   match t with
   | Alias t -> pp_expr out t

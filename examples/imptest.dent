@@ -1,11 +1,13 @@
 module ImplicitTest
 
-data ( ≡ ) : { a: Type } → a → Type =
-  Refl : { a : Type } → a ≡ a
+data ( ≡ ) : (a : U) → a → U =
+  Refl : ∀ a. a ≡ a
 
-(* the compiler will prove this true. *)
-dec sym : { a, b : Type } → a ≡ b → b ≡ a
+dec one_plus_one : 1 + 1 ≡ 2
+def one_plus_one := Refl
+
+dec sym : ∀ a b. a ≡ b → b ≡ a
 def sym Refl := Refl
 
-dec trans : { a, b, c : Type } → a ≡ b → b ≡ c → a ≡ c
+dec trans : ∀ a b c. a ≡ b → b ≡ c → a ≡ c
 def trans Refl x := x

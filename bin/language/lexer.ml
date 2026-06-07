@@ -51,8 +51,8 @@ let keywords =
     ("data", DATA);
     ("record", RECORD);
     ("constructor", CONSTRUCTOR);
-    ("universe", UNIVERSE);
-    ("Type", TTYPE);
+    ("U", UNIVERSE);
+    ("forall", FORALL);
     ("fun", FUN);
     ("λ", FUN);
   ]
@@ -65,10 +65,12 @@ let builtin_symbol =
     ("⇒", F_ARROW);
     ("->", ARROW);
     ("→", ARROW);
-    ("→", ARROW);
+    ("∀", FORALL);
     ("@", ATSIGN);
     ("=@", RECORD_FUN);
     ("|", PIPE);
+    ("~", TILDE);
+    (".", DOT);
   ]
 
 let digit = [%sedlex.regexp? '0' .. '9']
@@ -76,7 +78,6 @@ let letter = [%sedlex.regexp? 'a' .. 'z' | 'A' .. 'Z']
 let int = [%sedlex.regexp? Opt '-', digit, Star (digit | '_')]
 let float = [%sedlex.regexp? Opt '-', Plus digit, '.', Plus digit]
 
-(* https://www.unicode.org/charts *)
 let utf_letter =
   [%sedlex.regexp?
     ( 0x0370 .. 0x03FF
@@ -89,6 +90,7 @@ let symbol =
   [%sedlex.regexp?
     ( '_'
     | '-'
+    | '~'
     | '+'
     | '*'
     | '\\'
@@ -142,7 +144,7 @@ let str = [%sedlex.regexp? ' ' | '\'' | letter | digit | symbol | newline]
 
 let ident =
   [%sedlex.regexp?
-    letter, Star ('_' | '.' | '\'' | letter | digit) | utf_letter]
+    letter, Star ('_' | letter | digit), Star '\'' | utf_letter]
 
 let rec token lexbuf =
   match%sedlex lexbuf with
@@ -162,6 +164,7 @@ let rec token lexbuf =
   | ';' -> with_pos lexbuf SEMI
   | ',' -> with_pos lexbuf COMMA
   | '_' -> with_pos lexbuf WILDCARD
+  | '`' -> with_pos lexbuf BTICK
   | Plus op ->
     let op' = lexeme lexbuf in
     let tok =
@@ -172,14 +175,15 @@ let rec token lexbuf =
     with_pos lexbuf tok
   | '\'' -> char lexbuf
   | '"' -> string (Buffer.create 20) lexbuf
+  | ident, Plus ('.', ident) ->
+    let i = lexeme lexbuf |> String.split_on_char '.' in
+    with_pos lexbuf (DOT_SEP_IDENT (List.hd i, List.tl i))
   | ident ->
     let i = lexeme lexbuf in
     let tok =
       match List.assoc_opt i keywords with
       | Some t -> t
       | None when is_upper i -> UPPER_IDENT i
-      | None when is_dot_separated i ->
-        DOT_SEP_IDENT (String.split_on_char '.' i)
       | None -> IDENT i
     in
     with_pos lexbuf tok
@@ -208,7 +212,7 @@ and char lexbuf =
   | _ ->
     let c = lexeme_char lexbuf in
     report_err
-      (Some (Location.of_lexbuf lexbuf), Printf.sprintf "Invalid char: %C" c)
+      (Some (Location.of_lexbuf lexbuf), Printf.sprintf "Invalid char: '%c'" c)
 
 and control lexbuf =
   match%sedlex lexbuf with
@@ -220,7 +224,7 @@ and control lexbuf =
     let c = lexeme_char lexbuf in
     report_err
       ( Some (Location.of_lexbuf lexbuf),
-        Printf.sprintf "Invalid escape sequence: %C" c )
+        Printf.sprintf "Invalid escape sequence: '%c'" c )
 
 and string b lexbuf =
   match%sedlex lexbuf with
@@ -234,4 +238,4 @@ and string b lexbuf =
     let c = lexeme_char lexbuf in
     report_err
       ( Some (Location.of_lexbuf lexbuf),
-        Printf.sprintf "Invalid string character: %C" c )
+        Printf.sprintf "Invalid string character: '%c'" c )

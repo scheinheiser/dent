@@ -1,6 +1,6 @@
 module Match
 
-union Boolean : Type =
+data Boolean : U =
   | True : Boolean
   | False : Boolean
 
@@ -80,10 +80,10 @@ NOTE: idk if it'd need to have repeated application like this?
         def ( ∧ ) :=
           λ m.
             λ n.
-              match (m, n) to
-              | (False, r) ⇒ False
-              | (l, False) ⇒ False
-              | (_, _)     ⇒ True
+              match m, n to
+              | False, r ⇒ False
+              | l, False ⇒ False
+              | _, _     ⇒ True
 
       this'd also mean less work in the implementation.
 *)

@@ -1,3 +1,4 @@
+(* a location in the file. *)
 type t = {
   filename : string;
   start_line : int;
@@ -6,7 +7,7 @@ type t = {
   end_col : int;
 }
 
-(* dummy location, where values are initialised to defaults. *)
+(* dummy location with default values *)
 val dummy_loc : t
 
 (* pretty print location *)

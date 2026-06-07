@@ -1,0 +1,8 @@
+module State
+
+record State s a where
+  constructor MkState
+  | runState : s → (a × s)
+
+dec get : ∀ s. State s s
+def get := MkState (λ s. s × s)

@@ -18,7 +18,7 @@ and token =
   | TY_ATOM
   | IDENT of string
   | UPPER_IDENT of string
-  | DOT_SEP_IDENT of string list
+  | DOT_SEP_IDENT of string * string list
   | OP of string
   | WHEN
   | WHERE
@@ -33,7 +33,6 @@ and token =
   | ELSE
   | DEC
   | TYPE
-  | TILDE
   | DEF
   | FUN
   | LET
@@ -46,7 +45,7 @@ and token =
   | RECORD
   | CONSTRUCTOR
   | UNIVERSE
-  | TTYPE
+  | FORALL
   | STAR
   | PIPE
   | LBRACE
@@ -61,11 +60,13 @@ and token =
   | ASSIGNMENT
   | ARROW
   | F_ARROW
+  | TILDE
   | ATSIGN
   | RECORD_FUN
   | DOT
   | COMMA
   | WILDCARD
+  | BTICK
   | EOF
 
 let show (t : token) : string =
@@ -86,7 +87,8 @@ let show (t : token) : string =
   | TY_ATOM -> "TY_ATOM"
   | IDENT i -> sprintf "IDENT %s" i
   | UPPER_IDENT i -> sprintf "UPPER_IDENT %s" i
-  | DOT_SEP_IDENT i -> sprintf "DOT_SEP_IDENT %s" (String.concat "." i)
+  | DOT_SEP_IDENT (i, is) ->
+    sprintf "DOT_SEP_IDENT %s.%s" i (String.concat "." is)
   | OP o -> sprintf "OP %s" o
   | WHEN -> "WHEN"
   | WHERE -> "WHERE"
@@ -101,7 +103,6 @@ let show (t : token) : string =
   | ELSE -> "ELSE"
   | DEC -> "DEC"
   | TYPE -> "TYPE"
-  | TILDE -> "TILDE"
   | DEF -> "DEF"
   | FUN -> "FUN"
   | LET -> "LET"
@@ -114,7 +115,7 @@ let show (t : token) : string =
   | RECORD -> "RECORD"
   | CONSTRUCTOR -> "CONSTRUCTOR"
   | UNIVERSE -> "UNIVERSE"
-  | TTYPE -> "TTYPE"
+  | FORALL -> "FORALL"
   | STAR -> "STAR"
   | PIPE -> "PIPE"
   | LBRACE -> "LBRACE"
@@ -129,9 +130,11 @@ let show (t : token) : string =
   | ASSIGNMENT -> "ASSIGNMENT"
   | ARROW -> "ARROW"
   | F_ARROW -> "F_ARROW"
+  | TILDE -> "TILDE"
   | ATSIGN -> "ATSIGN"
   | RECORD_FUN -> "RECORD_FUN"
   | DOT -> "DOT"
   | COMMA -> "COMMA"
   | WILDCARD -> "WILDCARD"
+  | BTICK -> "BACKTICK"
   | EOF -> "EOF"

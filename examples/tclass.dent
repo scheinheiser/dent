@@ -1,82 +1,88 @@
 module TypeClass
 
-class toInt : (a : Type) includes
-  dec toInt : a -> Int
+dec ( ∙ ) : ∀ a b c. (b → c) → (a → b) → a → c
+dec ( ∙ ) g f x := g (f x)
+
+class Monoid (a ~ U) where
+  | mempty : a
+
+class Functor (f ~ U → U) where
+  | fmap : ∀ a b. (a → b) → f a → f b
+  | ( <$ ) : ∀ a b. a → f b → f a
+default
+  def ( <$ ) a _ = fmap id a
 end
 
-class Add : (a : Type) includes
-  dec ( + ) : a -> a -> a
+class Foldable (f ~ U → U) where
+  | fold    : ∀ (a ~ [Monoid] U). f a → a
+  | foldMap : ∀ a (b ~ [Monoid] U). (a → b) → f a → f b
+  | foldr   : ∀ a b. (a → b → b) → b → f a → b
+  | foldl   : ∀ a b. (b → a → b) → b → f a → b
+
+class Applicative (f ~ [Functor] U → U) where
+  | pure    : ∀ a. a → f a
+  | ( <*> ) : ∀ a b. f (a → b) → f a → f b
+
+class Monad (m ~ [Applicative] U → U) where
+  | ( >>= ) : ∀ a b. m a → (a → m b) → m b
+  | ( >> )  : ∀ a b. m a → m b → m b
+  | return  : ∀ a. a → m a
+default
+  def ( >> ) l r = l >>= λ _ ⇒ r
+  def return = pure
 end
 
-class Semigroup : (a : Type) includes
-  dec ( <> ) : a -> a -> a
+class Traversable (t: [Foldable, Functor] U → U) where
+  | traverse  : ∀ (f ~ [Applicative] U → U) a b. (a → f b) → t a → f (t b)
+  | sequenceA : ∀ (f ~ [Applicative] U → U) a.   t (f a) → f (t a)
+default
+  def traverse f := sequenceA ∙ fmap f
+  def sequenceA v := traverse id
 end
 
-class Monoid : Semigroup (a : Type) => a includes
-  dec mempty : a
+data List : U → U =
+  | Nil   : ∀ a. a → List a
+  | (::)  : ∀ a. a → List a → List a
+
+dec singleton : ∀ a. a → List a
+def singleton v := [ v ]
+
+dec append : ∀ a. List a → List a → List a
+def append [] l := l
+def append (x :: xs) l := x :: append l xs
+
+dec concat : ∀ a. List (List a) → List a
+def concat [] := 
+def concat (x :: xs) := x `append` (concat xs)
+
+dec map : ∀ a b. → (a → b) → List a → List b
+def map _ [] := []
+def map f (x :: xs) := f x :: map f xs
+
+instance Functor List where
+  dec fmap : ∀ a b. (a → b) → List a → List b
+  def fmap := map
 end
 
-(* numbers *)
-data Nat : Type =
-  | Z : Nat
-  | S : Nat -> Nat
+instance Applicative List where
+  dec pure : ∀ a. → a → List a
+  def pure := singleton
 
-dec make : Int -> Nat
-def make n := go n Z
-  with
-    dec go : Int -> Nat -> Nat
-    def go 0 acc := acc
-    def go n acc := go (n - 1) (S acc)
-  end
-
-dec add : Nat -> Nat -> Nat
-def add x Z := x
-def add x (S y) := add (S x) y
-
-instance toInt Nat where
-  dec toInt : Nat -> Int
-  def toInt := make
+  dec ( <*> ) : ∀ a b. List (a → b) → List a → List b
+  def ( <*> ) [] _ := []
+  def ( <*> ) (f :: fs) xs := (f `fmap` xs) `append` (fs <*> xs)
 end
 
-instance Num Nat where
-  dec ( + ) : Nat -> Nat -> Nat
-  def ( + ) := add
+instance Monad List where
+  dec ( >>= ) : ∀ a b. List a → (a → List b) → List b
+  def ( >>= ) l f := concat $ map f l
+
+  dec ( >> ) : ∀ a b. List a → List b → List b
+  def ( >> ) _ l := l
+
+  dec return : ∀ a. a → List a
+  def return := pure
 end
 
-instance Semigroup Nat where
-  dec ( <> ) : Nat -> Nat -> Nat
-  def ( <> ) := add
-end
-
-instance Monoid Nat where
-  dec mempty : Nat
-  def mempty := Z
-end
-
-(* lists *)
-data List : (a : Type) -> List a =
-  | Nil : List a
-  | ( :: ) : a -> List a -> List a
-
-dec append : { a : Type } -> List a -> List a -> List a
-def append l r := go (reverse l []) r
-  with
-    def go [] r := r
-    def go (x :: xs) r := go xs (x :: r)
-
-    def reverse [] acc := acc
-    def reverse (x :: xs) acc := reverse xs (x :: acc)
-  end
-
-instance Semigroup (List a) where
-  dec ( <> ) : {a : Type} -> List a -> List a -> List a
-  def ( <> ) := append
-end
-
-instance Monoid (List a) where
-  dec mempty : List a
-  def mempty := []
-end
-
-dec main : IO Unit
-def main := print "hello world"
+dec liftA : ∀ (f ~ [Applicative] U → U) a b. (a → b) → f a → f b
+def liftA f a := pure f <*> a

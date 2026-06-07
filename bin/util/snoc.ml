@@ -3,6 +3,7 @@ type 'a t =
   | Snoc of 'a t * 'a
 
 let empty = Lin
+let singleton v = Snoc (Lin, v)
 
 let length s =
   let rec go s acc =
@@ -11,6 +12,10 @@ let length s =
     | Snoc (r, _) -> go r (acc + 1)
   in
   go s 0
+
+let hd = function
+  | Lin -> failwith "Snoc.hd"
+  | Snoc (_, x) -> x
 
 let nth s n =
   let rec go s n =
@@ -70,22 +75,25 @@ let rec map f = function
   | Lin -> Lin
   | Snoc (r, v) -> map f r @> f v
 
+let rec map2 f l r =
+  match (l, r) with
+  | Lin, Lin -> Lin
+  | Snoc (ls, l), Snoc (rs, r) -> map2 f ls rs @> f l r
+  | _ -> failwith "Snoc.map2"
+
 let rec fold_left f acc s =
   match s with
   | Lin -> acc
   | Snoc (r, v) -> f (fold_left f acc r) v
 
-let fold_lefti f acc s =
-  let rec go f acc n = function
-    | Lin -> acc
-    | Snoc (r, v) -> f n (go f acc (n + 1) r) v
-  in
-  go f acc 0 s
-
 let rec fold_right f s acc =
   match s with
   | Lin -> acc
   | Snoc (r, v) -> fold_right f r (f v acc)
+
+let rec find_opt f = function
+  | Lin -> None
+  | Snoc (xs, x) -> if f x then Some x else find_opt f xs
 
 let find_mapi f s =
   let rec go f s n =
@@ -97,3 +105,13 @@ let find_mapi f s =
       | v -> v)
   in
   go f s 0
+
+let combine_errors s =
+  let rec go acc = function
+    | Lin -> Some (reverse acc)
+    | Snoc (xs, x) -> (
+      match x with
+      | None -> None
+      | Some x -> go (acc @> x) xs)
+  in
+  go empty s

@@ -27,12 +27,13 @@ and expr =
   | RUpdate of string * (update_type * string * located_expr) list
     (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
+  | Annot of located_expr * located_expr (* e ~ t *)
 
-and bind = string * bool (* identifier, is implicit? *)
+and bind = string * icit (* identifier, is implicit? *)
 
 and update_type =
-  | Val (* { x where y₁ := z₁ } *)
-  | Func (* { x where y₁ =@ z₁ } - z₁ is a function. *)
+  | Assign (* { x where y₁ := z₁ } *)
+  | Apply (* { x where y₁ =@ z₁ } - z₁ is a function. *)
 
 type located_ty_decl = Location.t * ty_decl
 and ty_decl = string * tdecl_type

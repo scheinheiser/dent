@@ -18,7 +18,7 @@ and token =
   | TY_ATOM
   | IDENT of string
   | UPPER_IDENT of string
-  | DOT_SEP_IDENT of string list
+  | DOT_SEP_IDENT of string * string list
   | OP of string
   | WHEN
   | WHERE
@@ -33,7 +33,6 @@ and token =
   | ELSE
   | DEC
   | TYPE
-  | TILDE
   | DEF
   | FUN
   | LET
@@ -46,7 +45,7 @@ and token =
   | RECORD
   | CONSTRUCTOR
   | UNIVERSE
-  | TTYPE
+  | FORALL
   | STAR
   | PIPE
   | LBRACE
@@ -61,11 +60,13 @@ and token =
   | ASSIGNMENT
   | ARROW
   | F_ARROW
+  | TILDE
   | ATSIGN
   | RECORD_FUN
   | DOT
   | COMMA
   | WILDCARD
+  | BTICK
   | EOF
 
 val show : token -> string

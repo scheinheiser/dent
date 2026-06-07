@@ -1,17 +1,18 @@
 module T
 
-dec tup : (Int, Bool, Bool)
-def tup := (10, true, "hi")
-
 (* ALIAS TESTS - WORKING *)
-(*
 alias Boolean := Bool
 
-dec chooseType : Boolean → Type
-def chooseType b :=
-  match true to
-  | true ⇒ String
-  | false ⇒ Int
+dec bing : Bool → Bool
+def bing := λ b. b ~ Boolean
+
+(*
+dec chooseType : Bool → U
+def chooseType :=
+  λ b.
+    match b to
+    | true ⇒ String
+    | false ⇒ Int
 
 dec v : chooseType true
 def v := "hello"
@@ -19,35 +20,49 @@ def v := "hello"
 
 (* UNION TESTS - kinda working *)
 (*
-data Pair : Type → Type → Type =
-  ( × ) : (a, b : Type) → Pair a b
+data Pair : U → U → U =
+  ( × ) : (a, b : U) → a → b → Pair a b
 
-dec fst : (a, b : Type) → Pair a b → a
-def fst := λ _ _ (x × _) → x
+def test :=
+  let v := ( × ) Int Int 10 10 in
+  match v to
+  | _ × _ ⇒ True
+  | _ ⇒ False
 
-dec snd : (a, b : Type) → Pair a b -> a
-def snd := λ _ _ (_ × y) → y
+dec fst : (a, b : U) → Pair a b → a
+def fst := λ _ _ (x × _). x
 
-dec swap : (a, b : Type) → Pair a b → Pair b a
-def swap := λ _ _ (x × y) → y × x
+dec snd : (a, b : U) → Pair a b -> a
+def snd := λ _ _ (_ × y). y
 
-dec map : (a, b, c : Type) → (b → c) → Pair a b → Pair a c
-def map := λ a b c f (x × y) → x × f y
+dec swap : (a, b : U) → Pair a b → Pair b a
+def swap := λ _ _ (x × y). y × x
 *)
 
 (* RECORD TESTS *)
 (*
-record Point : Type =
+record Bing : U =
+  constructor MkBing
+  | v : Bool
+
+dec ( + ) : Int → Int → Int
+
+record Point : U =
   constructor MkPoint
   | x : Int
   | y : Int
+  (*| b : Bing*)
 
-dec point : Int → Int → Point
-def point x y := MkPoint { x; y } (* record punning *)
+dec point : Int → Int → Int
+def point := 
+  λ x y.
+  (*let b := MkBing { v := true } in*)
+  let z := MkPoint { x; y } in (* record punning *)
+  z.x
 
 dec incX : Int → Point → Point
-def incX n p := { p where x := p.x + n }
+def incX := λ n p. { p where x := p.x + n }
 
 dec incY : Int → Point → Point
-def incY n p := { p where y =@ (+ n) } (* field function application *)
+def incY := λ n p. { p where y =@ (+ n) } (* field function application *)
 *)

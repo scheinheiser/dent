@@ -4,7 +4,7 @@ type binder = int
 
 type ident =
   | Ident of string
-  | AccessIdent of string list
+  | AccessIdent of string * string list
   | Udc of string (* user defined costructor *)
 
 type const =
@@ -23,6 +23,10 @@ type prim =
   | PBool
   | PUnit
   | PUni of int
+
+type icit =
+  | Imp
+  | Exp
 
 type located_pattern = Location.t * pattern
 

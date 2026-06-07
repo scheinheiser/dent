@@ -5,7 +5,7 @@ type binder = int
 
 type ident =
   | Ident of string
-  | AccessIdent of string list
+  | AccessIdent of string * string list
   | Udc of string (* user defined costructor *)
 
 type const =
@@ -23,7 +23,11 @@ type prim =
   | PChar
   | PBool
   | PUnit
-  | PUni of int (* A : Type n *)
+  | PUni of int (* α ~ U n *)
+
+type icit =
+  | Imp
+  | Exp
 
 type located_pattern = Location.t * pattern
 
@@ -33,7 +37,7 @@ and pattern =
   | PTypeLit of prim
   | PVar of string
   | PCtor of string * located_pattern list
-  | PTuple of located_pattern * located_pattern
+  | PTuple of located_pattern * located_pattern (*TODO: remove this to simply compiler implementation. *)
 
 type located_import = Location.t * import
 and import = ident * import_cond option
@@ -80,13 +84,13 @@ let show_prim = function
 (* idents *)
 let get_str = function
   | Ident i | Udc i -> i
-  | AccessIdent is -> String.concat "." is
+  | AccessIdent (base, is) -> Printf.sprintf "%s.%s" base (String.concat "." is)
 
 (* pretty printing *)
 let pp_ident out (i : ident) =
   match i with
   | Ident i | Udc i -> Format.fprintf out "%s" i
-  | AccessIdent is -> Format.fprintf out "%s" (String.concat "." is)
+  | AccessIdent (i, is) -> Format.fprintf out "%s.%s" i (String.concat "." is)
 
 let pp_prim out (t : prim) = Format.fprintf out "%s" (show_prim t)
 
@@ -104,8 +108,7 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
   | PConst c -> pp_const out c
   | PTypeLit p -> pp_prim out p
   | PWild -> Format.fprintf out "_"
-  | PTuple (l, r) ->
-    Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
+  | PTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
   | PCtor (i, v) ->
     Format.fprintf out "(%s %a)" i
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)

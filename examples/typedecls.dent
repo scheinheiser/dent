@@ -1,10 +1,10 @@
-module TypeDeclSyntax
+module UDeclSyntax
 
 (* a simple alias to give users more context about a type. *)
 alias IsWorker := Bool
 
 (* the type signature is declared similarly to let expressions. *)
-data Basket : (price: Type) -> Type =
+data Basket : (price: U) -> U =
   | Apple    : price -> Basket price (* explicit type signature for variants. *)
   | Banana   : price -> Basket price
   | Bag      : Basket price % empty variant
@@ -12,34 +12,34 @@ data Basket : (price: Type) -> Type =
 @rassoc 7 :.
 
 (* unions can contain only operator constructors. *)
-union List : (a: Type) -> Type =
+union List : (a: U) -> U =
   | Nil    : List a
   | ( :: ) : a -> List a -> List a
 @rassoc 7 ::
 
 (* the constructor is declared before the definition *)
-record Person : (price: Type) -> Type = 
+record Person : (price: U) -> U = 
   constructor MkPerson
   | name   : String
   | age    : Int
   | status : IsWorker
   | basket : Basket price
 
-dec unsafeHead : (a : Type) -> List a -> a
+dec unsafeHead : (a : U) -> List a -> a
 def unsafeHead _ (h :: _) := h
 
-dec getPrice : (a : Type) -> Basket a -> a
+dec getPrice : (a : U) -> Basket a -> a
 def getPrice _ (Apple p)  := p
 def getPrice _ (Banana p) := p
 def getPrice a (l :. r)   := getPrice a l + getPrice a r
 def getPrice _ Bag        := 0
 
 (* you can pun record fields *)
-dec addEmployee : (price: Type) -> String -> Int -> Basket price -> Person price
+dec addEmployee : (price: U) -> String -> Int -> Basket price -> Person price
 def addEmployee _ name age basket := MkPerson { age; name; basket; status := true}
 
-dec personBasketPrice : (a : Type) -> Person a -> a
+dec personBasketPrice : (a : U) -> Person a -> a
 def personBasketPrice ap := getPrice a p.basket
 
-dec addItem : (a : Type) -> Person a -> Basket a -> Person a
+dec addItem : (a : U) -> Person a -> Basket a -> Person a
 def addItem _ p item := { p where basket := item :. p.basket }
