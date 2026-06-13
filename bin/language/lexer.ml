@@ -143,8 +143,7 @@ let whitespace = [%sedlex.regexp? Plus (' ' | '\t')]
 let str = [%sedlex.regexp? ' ' | '\'' | letter | digit | symbol | newline]
 
 let ident =
-  [%sedlex.regexp?
-    letter, Star ('_' | letter | digit), Star '\'' | utf_letter]
+  [%sedlex.regexp? letter, Star ('_' | letter | digit), Star '\'' | utf_letter]
 
 let rec token lexbuf =
   match%sedlex lexbuf with

@@ -12,18 +12,18 @@ data Basket : (price: U) -> U =
 @rassoc 7 :.
 
 (* unions can contain only operator constructors. *)
-union List : (a: U) -> U =
-  | Nil    : List a
-  | ( :: ) : a -> List a -> List a
+union List : U -> U =
+  | Nil    : ∀ a. List a
+  | ( :: ) : ∀ a. a -> List a -> List a
 @rassoc 7 ::
 
 (* the constructor is declared before the definition *)
-record Person : (price: U) -> U = 
+record Person a = 
   constructor MkPerson
   | name   : String
   | age    : Int
   | status : IsWorker
-  | basket : Basket price
+  | basket : Basket a
 
 dec unsafeHead : (a : U) -> List a -> a
 def unsafeHead _ (h :: _) := h

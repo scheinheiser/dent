@@ -1,7 +1,10 @@
-module TypeClass
+modult TypeClass
 
 dec ( ∙ ) : ∀ a b c. (b → c) → (a → b) → a → c
-dec ( ∙ ) g f x := g (f x)
+def ( ∙ ) g f x := g (f x)
+
+dec ( $ ) : ∀ a b. (a → b) → a → b
+def ( $ ) f a := f a
 
 class Monoid (a ~ U) where
   | mempty : a
@@ -28,7 +31,7 @@ class Monad (m ~ [Applicative] U → U) where
   | ( >> )  : ∀ a b. m a → m b → m b
   | return  : ∀ a. a → m a
 default
-  def ( >> ) l r = l >>= λ _ ⇒ r
+  def ( >> ) l r = l >>= λ _. r
   def return = pure
 end
 
@@ -52,7 +55,7 @@ def append [] l := l
 def append (x :: xs) l := x :: append l xs
 
 dec concat : ∀ a. List (List a) → List a
-def concat [] := 
+def concat [] := []
 def concat (x :: xs) := x `append` (concat xs)
 
 dec map : ∀ a b. → (a → b) → List a → List b
@@ -65,7 +68,7 @@ instance Functor List where
 end
 
 instance Applicative List where
-  dec pure : ∀ a. → a → List a
+  dec pure : ∀ a. a → List a
   def pure := singleton
 
   dec ( <*> ) : ∀ a b. List (a → b) → List a → List b

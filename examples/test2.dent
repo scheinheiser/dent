@@ -1,18 +1,38 @@
 module T
 
 (* ALIAS TESTS - WORKING *)
-alias Boolean := Bool
+data Boolean : U =
+  | True  : Boolean
+  | False : Boolean
 
-dec bing : Bool → Bool
-def bing := λ b. b ~ Boolean
+data Wrapper : U =
+  | Left  : Boolean → Wrapper
+  | Right : Boolean → Wrapper
+
+data Nat : U =
+  | Z : Nat
+  | S : Nat → Nat
+
+dec chooseType : Wrapper → U
+def chooseType (Left True) := String
+def chooseType (Left False) := Int
+def chooseType (Right True) := Bool
+def chooseType (Right False) := Float
 
 (*
-dec chooseType : Bool → U
-def chooseType :=
-  λ b.
-    match b to
-    | true ⇒ String
-    | false ⇒ Int
+dec ( ∧ ) : Boolean → Boolean → Boolean
+def ( ∧ ) False r := False
+def ( ∧ ) l False := False
+def ( ∧ ) _ _ := True
+*)
+
+(*
+dec ( * ) : Nat → Nat → Nat
+
+dec plus : Nat → Nat → Nat
+def plus (S Z) m := m
+def plus (S n) m := n * m
+def plus Z m     := m
 
 dec v : chooseType true
 def v := "hello"

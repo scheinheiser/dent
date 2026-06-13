@@ -6,3 +6,6 @@ record State s a where
 
 dec get : ∀ s. State s s
 def get := MkState (λ s. s × s)
+
+dec put : ∀ s. s → State Unit s
+def put := λ s. MkState (λ _. (), s)

@@ -8,3 +8,11 @@ data Vec : (n: Nat) → (a: U) → U =
 
 dec empty : ∀ a. Vec Z a
 def empty := Nil
+
+dec append : ∀ (n ~ Nat) a. a → Vec n a → Vec (S n) a
+def append v vec := v @: vec
+
+dec index : ∀ (n ~ Nat) a. Fin n → Vec n a → a
+def index FZ (v @: _) := v
+def index (FS n) (_ @: vs) := index n vs
+def index ! Nil (* this case is impossible *)

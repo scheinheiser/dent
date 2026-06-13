@@ -351,10 +351,10 @@ module Parser = struct
       match Lexer.current l with
       | _, UPPER_IDENT i ->
         Lexer.skip ~am:1 l;
-        let* ps = 
-          ((fun l -> Lexer.list_with_end l (( = ) RPAREN) parse_pattern)
-          <|> (fun _ -> ok []))
-          l
+        let* ps =
+          ( (fun l -> Lexer.list_with_end l (( = ) RPAREN) parse_pattern)
+          <|> fun _ -> ok [] )
+            l
         in
         let* e =
           Lexer.consume_with_pos l RPAREN
@@ -373,12 +373,7 @@ module Parser = struct
               Printf.sprintf "Expected ')', but got '%s'." (Token.show tok) )))
     | s, WILDCARD -> parse_pbop l (s, PWild)
     | s, IDENT i -> parse_pbop l (s, PVar i)
-    | s, UPPER_IDENT i ->
-      ( (fun l ->
-          let* ((e, _) as v) = parse_pattern l in
-          parse_pbop l (Location.combine s e, PCtor (i, [v])))
-      <|> fun _ -> parse_pbop l (s, PCtor (i, [])) )
-        l
+    | s, UPPER_IDENT i -> parse_pbop l (s, PCtor (i, []))
     | s, INT i -> parse_pbop l (s, PConst (Int i))
     | s, FLOAT i -> parse_pbop l (s, PConst (Float i))
     | s, STRING i -> parse_pbop l (s, PConst (String i))
@@ -721,7 +716,7 @@ module Parser = struct
 
   and parse_binding (l : Lexer.t) ~(icit : icit) (s : Location.t)
       (om : operator_map) : Ast.located_expr Lexer.result =
-    let r_paren = 
+    let r_paren =
       match icit with
       | Exp -> RPAREN
       | Imp -> RBRACE
@@ -745,34 +740,46 @@ module Parser = struct
     let loc = Location.combine s e in
     List.fold_right (fun n acc -> (loc, Ast.Pi ((n, icit), l', acc))) is r
 
-  and parse_type_ident (l: Lexer.t) (om: operator_map) : (string * Ast.located_expr) Lexer.result =
+  and parse_type_ident (l : Lexer.t) (om : operator_map) :
+      (string * Ast.located_expr) Lexer.result =
     let s = Lexer.current_pos l in
-    ((fun l -> 
-      (* ∀ a. ⇒ ∀ (a ~ U) *)
-      let@ i = parse_ident l in 
-      let t = s, Ast.TypeLit (PUni 0) in
-      i, t)
-    <|>
-    (fun l ->
-      let* _ = Lexer.consume l LPAREN "Expected a '(' to begin a type identifier with an explicit type." in
+    ( (fun l ->
+        (* ∀ a. ⇒ ∀ (a ~ U). *)
+        let@ i = parse_ident l in
+        let t = (s, Ast.TypeLit (PUni 0)) in
+        (i, t))
+    <|> fun l ->
+      let* _ =
+        Lexer.consume l LPAREN
+          "Expected a '(' to begin a type identifier with an explicit type."
+      in
       let* i = parse_ident l in
-      let* _ = Lexer.consume l TILDE "Expected a '~' to separate the identifier and type." in
+      let* _ =
+        Lexer.consume l TILDE
+          "Expected a '~' to separate the identifier and type."
+      in
       let* t = parse_expr l 0 om in
-      let@ _ = Lexer.consume l RPAREN "Expected a ')' to end a type identifier with an explicit type." in
-      i, t))
-    l
+      let@ _ =
+        Lexer.consume l RPAREN
+          "Expected a ')' to end a type identifier with an explicit type."
+      in
+      (i, t) )
+      l
 
-  and parse_forall (l: Lexer.t) (om: operator_map) (s: Location.t) : Ast.located_expr Lexer.result =
-    let* binds = Lexer.list_with_end l ((=) DOT) (flip parse_type_ident om) in
-    let* _ = Lexer.consume l DOT "Expected a '.' to separate the binders in a forall expression." in
-    let@ (e, _) as t = parse_expr l 0 om in
+  and parse_forall (l : Lexer.t) (om : operator_map) (s : Location.t) :
+      Ast.located_expr Lexer.result =
+    let* binds = Lexer.list_with_end l (( = ) DOT) (flip parse_type_ident om) in
+    let* _ =
+      Lexer.consume l DOT
+        "Expected a '.' to separate the binders in a forall expression."
+    in
+    let@ ((e, _) as t) = parse_expr l 0 om in
     let loc = Location.combine s e in
-    List.fold_right 
-      (fun (i, t) acc -> 
-        let bind = i, Imp in
-        loc, Ast.Pi (bind, t, acc))
-      binds
-      t
+    List.fold_right
+      (fun (i, t) acc ->
+        let bind = (i, Imp) in
+        (loc, Ast.Pi (bind, t, acc)))
+      binds t
 
   and parse_record_fields (l : Lexer.t) (om : operator_map) :
       (Location.t * (string * Ast.located_expr) list) Lexer.result =
@@ -885,9 +892,7 @@ module Parser = struct
   and parse_lam (l : Lexer.t) (om : operator_map) (s : Location.t) :
       Ast.located_expr Lexer.result =
     let* args = parse_args l in
-    let* _ =
-      Lexer.consume l DOT "Expected '.' after lambda arguments."
-    in
+    let* _ = Lexer.consume l DOT "Expected '.' after lambda arguments." in
     let@ b = parse_expr l 0 om in
     let loc = Location.combine s (Lexer.current_pos l) in
     List.fold_right (fun n acc -> (loc, Ast.Lam (n, acc))) args b

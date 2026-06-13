@@ -37,7 +37,8 @@ and pattern =
   | PTypeLit of prim
   | PVar of string
   | PCtor of string * located_pattern list
-  | PTuple of located_pattern * located_pattern (*TODO: remove this to simply compiler implementation. *)
+  | PTuple of located_pattern * located_pattern
+(*TODO: remove this to simply compiler implementation. *)
 
 type located_import = Location.t * import
 and import = ident * import_cond option
@@ -67,7 +68,7 @@ let rec prim_equality l r =
   | PChar, PChar
   | PBool, PBool
   | PUnit, PUnit -> true
-  | PUni n, PUni n' -> n = n'
+  | PUni n, PUni n' -> n <= n'
   | _ -> false
 
 and ( #= ) l r = prim_equality l r
@@ -109,6 +110,7 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
   | PTypeLit p -> pp_prim out p
   | PWild -> Format.fprintf out "_"
   | PTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
+  | PCtor (i, []) -> Format.fprintf out "%s" i
   | PCtor (i, v) ->
     Format.fprintf out "(%s %a)" i
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
