@@ -10,7 +10,8 @@ dec empty : ∀ a. Vec Z a
 def empty := Nil
 
 dec append : ∀ (n ~ Nat) a. a → Vec n a → Vec (S n) a
-def append v vec := v @: vec
+def append Nil r := r
+def append (l @: ls) r := l @: (append ls r)
 
 dec index : ∀ (n ~ Nat) a. Fin n → Vec n a → a
 def index FZ (v @: _) := v

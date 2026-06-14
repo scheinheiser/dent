@@ -4,11 +4,11 @@ module UDeclSyntax
 alias IsWorker := Bool
 
 (* the type signature is declared similarly to let expressions. *)
-data Basket : (price: U) -> U =
-  | Apple    : price -> Basket price (* explicit type signature for variants. *)
-  | Banana   : price -> Basket price
-  | Bag      : Basket price % empty variant
-  | ( :. )   : Basket price -> Basket price -> Basket price (* recursive, operator constructor. *)
+data Basket : U -> U =
+  | Apple    : ∀ a. a -> Basket a (* explicit type signature for variants. *)
+  | Banana   : ∀ a. a -> Basket a
+  | Bag      : ∀ a. Basket a % empty variant
+  | ( :. )   : ∀ a. Basket a -> Basket a -> Basket a (* recursive, operator constructor. *)
 @rassoc 7 :.
 
 (* unions can contain only operator constructors. *)
@@ -25,21 +25,21 @@ record Person a =
   | status : IsWorker
   | basket : Basket a
 
-dec unsafeHead : (a : U) -> List a -> a
-def unsafeHead _ (h :: _) := h
+dec unsafeHead : ∀ a. List a -> a
+def unsafeHead (h :: _) := h
 
-dec getPrice : (a : U) -> Basket a -> a
-def getPrice _ (Apple p)  := p
-def getPrice _ (Banana p) := p
-def getPrice a (l :. r)   := getPrice a l + getPrice a r
-def getPrice _ Bag        := 0
+dec getPrice : ∀ a. Basket a -> a
+def getPrice (Apple p)  := p
+def getPrice (Banana p) := p
+def getPrice (l :. r)   := getPrice l + getPrice r
+def getPrice Bag        := 0
 
 (* you can pun record fields *)
-dec addEmployee : (price: U) -> String -> Int -> Basket price -> Person price
-def addEmployee _ name age basket := MkPerson { age; name; basket; status := true}
+dec addEmployee : ∀ a. String -> Int -> Basket a -> Person a
+def addEmployee name age basket := MkPerson { age; name; basket; status := true}
 
-dec personBasketPrice : (a : U) -> Person a -> a
+dec personBasketPrice : ∀ a. Person a -> a
 def personBasketPrice ap := getPrice a p.basket
 
-dec addItem : (a : U) -> Person a -> Basket a -> Person a
-def addItem _ p item := { p where basket := item :. p.basket }
+dec addItem : ∀ a. Person a -> Basket a -> Person a
+def addItem p item := { p where basket := item :. p.basket }

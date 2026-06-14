@@ -42,7 +42,7 @@ and tdecl_type =
   | Variant of
       located_expr
       * (string * located_expr) list (* type signature and variants *)
-  | Record of string * located_expr * (string * located_expr) list
+  | Record of string * ((string * located_expr) list) * (string * located_expr) list
 (* constructor name, type signature and fields *)
 
 type located_definition = Location.t * definition
@@ -133,7 +133,7 @@ and pp_tdecl_type out (t : tdecl_type) =
   match t with
   | Alias t -> pp_expr out t
   | Record (cons, tsig, r) ->
-    Format.fprintf out "(re@[<v>cord %s { %a }@,%a@])" cons pp_expr tsig
+    Format.fprintf out "(re@[<v>cord %s { %a }@,%a@])" cons Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_field) tsig
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@,") pp_field)
       r
   | Variant (tsig, v) ->

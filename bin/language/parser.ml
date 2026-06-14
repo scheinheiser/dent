@@ -728,14 +728,14 @@ module Parser = struct
         l
     in
     let* _ =
-      Lexer.consume l COLON
-        "Expected a ':' between a type and identifier in a type binding."
+      Lexer.consume l TILDE
+        "Expected a '~' between a type and identifier in a type binding."
     in
     let* l' = parse_expr l 0 om in
     let* _ =
       Lexer.consume l r_paren "Expected a ')' or '}' to end a type binding."
     in
-    let* _ = Lexer.consume l ARROW "Expected an '->' after a type binding." in
+    let* _ = Lexer.consume l ARROW "Expected an '->' or '→' after a type binding." in
     let@ ((e, _) as r) = parse_expr l 0 om in
     let loc = Location.combine s e in
     List.fold_right (fun n acc -> (loc, Ast.Pi ((n, icit), l', acc))) is r
@@ -1074,12 +1074,12 @@ module Parser = struct
 
   and parse_record (l : Lexer.t) (om : operator_map) :
       (Location.t * string * Ast.tdecl_type) Lexer.result =
-    let* s = Lexer.consume_with_pos l RECORD "Expected record keyword." in
     let* ident = parse_upper_ident l in
+    let* s = Lexer.consume_with_pos l RECORD "Expected record keyword." in
     let* _ =
       Lexer.consume l COLON "Expected a ':' before record type signature."
     in
-    let* t = parse_expr l 0 om in
+    let* tvs = Lexer.list_with_end l (( = ) EQ) (flip parse_type_ident om) in
     let* _ = Lexer.consume l EQ "Expected a '=' after record type signature." in
     let* _ =
       Lexer.consume l CONSTRUCTOR
@@ -1097,7 +1097,7 @@ module Parser = struct
     in
     Lexer.consume_opt l PIPE;
     let@ fields = Lexer.separated_list l ~sep:PIPE (flip parse_field om) in
-    (s, ident, Ast.Record (cons, t, fields))
+    (s, ident, Ast.Record (cons, tvs, fields))
 
   let parse_module (l : Lexer.t) : string Lexer.result =
     let* _ = Lexer.consume l MODULE "Expected the 'module' keyword." in
