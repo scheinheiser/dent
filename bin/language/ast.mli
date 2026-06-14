@@ -41,7 +41,8 @@ and ty_decl = string * tdecl_type
 and tdecl_type =
   | Alias of located_expr
   | Variant of located_expr * (string * located_expr) list
-  | Record of string * ((string * located_expr) list) * (string * located_expr) list
+  | Record of
+      string * (string * located_expr) list * (string * located_expr) list
 
 type located_definition = Location.t * definition
 

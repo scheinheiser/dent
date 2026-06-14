@@ -735,7 +735,9 @@ module Parser = struct
     let* _ =
       Lexer.consume l r_paren "Expected a ')' or '}' to end a type binding."
     in
-    let* _ = Lexer.consume l ARROW "Expected an '->' or '→' after a type binding." in
+    let* _ =
+      Lexer.consume l ARROW "Expected an '->' or '→' after a type binding."
+    in
     let@ ((e, _) as r) = parse_expr l 0 om in
     let loc = Location.combine s e in
     List.fold_right (fun n acc -> (loc, Ast.Pi ((n, icit), l', acc))) is r
