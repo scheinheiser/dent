@@ -10,14 +10,14 @@ and expr =
   (* we give each function a binder to distinguish between user-defined
      functions and builtins later on *)
   | Let of
-      located_pattern
+      located_expr
       * located_expr option
       * located_expr
       * located_expr (* let p₁ ... pₙ : <optional_ty> = e₁ in e₂ *)
   | Match of
-      located_expr * (located_pattern * located_expr option * located_expr) list
+      located_expr * (located_expr * located_expr option * located_expr) list
   | If of located_expr * located_expr * located_expr
-  | Lam of located_pattern * located_expr
+  | Lam of located_expr * located_expr
   | Const of const
   | Var of ident
   | TypeLit of prim
@@ -27,7 +27,9 @@ and expr =
   | RUpdate of string * (update_type * string * located_expr) list
     (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
+  | Impossible (* ! - an impossible pattern *)
   | Annot of located_expr * located_expr (* e ~ t *)
+  | As of string * located_expr (* x@y *)
 
 and bind = string * icit (* identifier, is implicit? *)
 
@@ -50,7 +52,7 @@ and definition =
   | Dec of string * located_expr
   | Def of
       string
-      * located_pattern list
+      * located_expr list
       * located_expr option
       * located_expr
       * with_block

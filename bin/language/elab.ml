@@ -21,6 +21,18 @@ type mv = int
 module IM = Map.Make (Int)
 module SM = Map.Make (String)
 
+(* matching patterns *)
+type located_pattern = Location.t * pattern
+and pattern =
+  | PWild (* _ *)
+  | PAbs (* ! - an impossible pattern *)
+  | PAs of string * located_pattern (* x@y *)
+  | PConst of const
+  | PTypeLit of prim
+  | PVar of string
+  | PCtor of string * located_pattern list
+  | PTuple of located_pattern * located_pattern
+
 (* bound or defined variables *)
 type bd =
   | B
@@ -31,7 +43,7 @@ type bd =
 type tm =
   | Local of string * ix (* local variable as de bruijn index *)
   | Top of string (* reference to a top level function *)
-  | Ap of binder * tm * tm
+  | Ap of int * tm * tm
   | Mv of mv
   | IMv of mv * bd Snoc.t (* generated mv *)
   | Tuple of tm * tm
@@ -91,6 +103,21 @@ let gen_mv bds : tm =
   IMv (mv, bds)
 
 (* pretty printing *)
+let rec pp_pattern out ((_, arg) : located_pattern) =
+  match arg with
+  | PConst c -> pp_const out c
+  | PTypeLit p -> pp_prim out p
+  | PWild -> Format.fprintf out "_"
+  | PAbs -> Format.fprintf out "!"
+  | PAs (i, p) -> Format.fprintf out "%s@(%a)" i pp_pattern p
+  | PTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
+  | PCtor (i, []) -> Format.fprintf out "%s" i
+  | PCtor (i, v) ->
+    Format.fprintf out "(%s %a)" i
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
+     v
+  | PVar i -> Format.fprintf out "%s" i
+
 let rec pp_tm out (tm : tm) =
   match tm with
   | Local (i, _) | Top i -> Format.fprintf out "%s" i
@@ -288,8 +315,11 @@ let rec quote (lvl : lvl) (v : val_) : tm =
     let quote_b env (p, wb, b) =
       let rec build_env env (_, p) l =
         match p with
-        | PWild | PTypeLit _ | PConst _ -> (env, l)
+        | PWild | PTypeLit _ | PConst _ | PAbs -> (env, l)
         | PVar i -> (env @> VLocal (i, l, Snoc.empty), l + 1)
+        | PAs (i, p) ->
+           let env, l = build_env env p l in
+           (env @> VLocal (i, l, Snoc.empty), l + 1)
         | PTuple (l', r) ->
           let env, l = build_env env l' l in
           build_env env r l
@@ -342,6 +372,7 @@ and problem = {
   target : val_;
 }
 
+(* for debugging *)
 let pp_constr out (i, p, t) =
   Format.fprintf out "%s /? %a ~ %a" i pp_pattern p pp_val t
 
@@ -600,7 +631,7 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
       err (Some ctx.loc, "Rigid mismatch in unification.")
   in
   match (force l, force r) with
-  | VTypeLit l, VTypeLit r when l#=r -> some ()
+  | VTypeLit l, VTypeLit r when l #= r -> some ()
   | VConst l, VConst r when l %= r -> some ()
   | VTuple (l, r), VTuple (l', r') ->
     let* _ = unify ctx l l' in
@@ -667,6 +698,7 @@ and equal_pat ctx (_, l) (_, r) : bool result =
   | PVar _, _ | _, PVar _ -> Some true
   | PConst l, PConst r when l %= r -> Some true
   | PTypeLit l, PTypeLit r when l#=r -> Some true
+  | PAbs, PAbs -> Some true
   | PTuple (l, r), PTuple (l', r') ->
     let* l = equal_pat ctx l l' in
     let@ r = equal_pat ctx r r' in
@@ -692,14 +724,58 @@ and unify_pat ctx l r : unit result =
           "Pa@[<v 4>ttern unification failed:@,Expected → %a@,Received → %a@,@]"
           pp_pattern l pp_pattern r )
 
+let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) : located_pattern result =
+  let rec flatten (_, ap) acc =
+    match ap with
+    | Ast.Ap (_, rest, s) -> flatten rest (acc @> s)
+    | e -> e, acc
+  in
+  let@ p =
+    match e with
+    | Ast.Hole -> Some PWild
+    | Ast.Impossible -> Some PAbs
+    | Ast.Const c -> Some (PConst c)
+    | Ast.TypeLit t -> Some (PTypeLit t)
+    | Ast.Var (Ident i) -> Some (PVar i)
+    | Ast.Var (Udc i) -> Some (PCtor (i, []))
+    | Ast.Tuple (l, r) ->
+       let* l = to_pattern ctx l in
+       let@ r = to_pattern ctx r in
+       PTuple (l, r)
+    | Ast.As (i, p) ->
+       let@ p = to_pattern ctx p in
+       PAs (i, p)
+    | Ast.RCons (cons, fs) ->
+       let* _, ex_fs, _ = lookup_rcon cons ctx in
+       let@ fs =
+         List.map
+           (fun (i, _) ->
+             match List.find_opt (fun (i', _) -> i = i') fs with
+             | Some (_, p) ->
+                (*TODO: check that the pattern is the right type for the field. *)
+                to_pattern ctx p
+             | None -> Some (loc, PWild))
+         ex_fs |> combine_errors
+       in
+       PCtor (cons, fs)
+    | Ast.Ap (_, _, _) as ap -> (
+       let base, args = flatten (loc, ap) Snoc.empty in
+       match base with
+       | Ast.Var (Udc i) ->
+          let@ ps = List.map (to_pattern ctx) (Snoc.to_list args) |> combine_errors in
+          PCtor (i, ps)
+       | e -> err (Some loc, Format.asprintf "Ex@[<v 2>pected a type constructor:@,Received → %a@]@." Ast.pp_expr (loc, e)))
+    | e -> err (Some loc, Format.asprintf "Ex@[<v 2>pected a pattern:@,Received → %a@]@." Ast.pp_expr (loc, e))
+  in loc, p
+
 let fresh_pattern_var () : string = "pat$" ^ (fresh_i () |> string_of_int)
 let fresh_bind_var () : string = "b$" ^ (fresh_i () |> string_of_int)
 let fresh_scrut_var () : string = "c_id$" ^ (fresh_i () |> string_of_int)
 
-let replace_pattern ((_, p) : located_pattern)
+let replace_pattern ((_, p) : Ast.located_expr)
     ((loc, _) as b : Ast.located_expr) : string * Ast.located_expr =
   match p with
-  | PVar i -> (i, b)
+  | Ast.Var (Ident i) -> (i, b)
   | _ ->
     (* we create a match expr to remove the pattern from the expression *)
     let i = fresh_pattern_var () in
@@ -721,8 +797,8 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     in
     Lam (i, b)
   | Ast.If (c, t, f), t' ->
-    let t = ((loc, PConst (Bool true)), None, t) in
-    let f = ((loc, PConst (Bool false)), None, f) in
+    let t = ((loc, Ast.Const (Bool true)), None, t) in
+    let f = ((loc, Ast.Const (Bool false)), None, f) in
     let e = (loc, Ast.Match (c, [t; f])) in
     check ctx e t'
   | Ast.Let (p, t, b, n), t' -> (
@@ -742,7 +818,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
   | Ast.Match (c, bs), t' ->
     let* c, t = infer ctx c in
     let c_id = fresh_scrut_var () in
-    let cs =
+    let* cs =
       List.map
         (fun (p, wb, ((loc, _) as b)) ->
           let wb =
@@ -750,8 +826,9 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
             | None -> (loc, Ast.Const (Bool true))
             | Some wb -> wb
           in
+          let@ p = to_pattern ctx p in
           (singleton (c_id, p, t), Snoc.empty, wb, b))
-        bs
+        bs |> combine_errors
     in
     let ctx = bind_var ~id:c_id ~t ctx in
     let@ ctree = build_tree ctx {clauses = cs; target = t'} in
@@ -1282,10 +1359,15 @@ and check_locals ctx locals =
     in
     let rec go ctx acc = function
       | [] -> (List.rev acc, ctx)
-      | d :: ds -> (
-        match check_definition ctx d with
-        | Some (d, ctx) -> go ctx (Some d :: acc) ds
-        | None -> go ctx (None :: acc) ds)
+      | (loc, (i, args, wb, b, locals)) :: ds -> (
+        let args = List.map (to_pattern ctx) args |> combine_errors in
+        match args with
+        | None -> go ctx (None :: acc) ds
+        | Some args ->
+          let d = loc, (i, args, wb, b, locals) in
+          match check_definition ctx d with
+          | Some (d, ctx) -> go ctx (Some d :: acc) ds
+          | None -> go ctx (None :: acc) ds)
     in
     let r, ctx =
       List.filter_map
@@ -1448,9 +1530,16 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let defs =
       List.filter_map
         (function
-          | loc, Ast.Def (i, as_, wb, b, wb') -> Some (loc, (i, as_, wb, b, wb'))
+          | loc, Ast.Def (i, args, wb, b, locals) -> Some (loc, (i, args, wb, b, locals))
           | _ -> None)
         defs
+    in
+    let* defs =
+      List.map
+        (fun (loc, (i, args, wb, b, locals)) ->
+          let@ args = List.map (to_pattern ctx) args |> combine_errors in
+          loc, (i, args, wb, b, locals))
+        defs |> combine_errors
     in
     let rec go ctx acc = function
       | [] -> acc

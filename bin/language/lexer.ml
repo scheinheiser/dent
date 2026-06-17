@@ -70,6 +70,7 @@ let builtin_symbol =
     ("=@", RECORD_FUN);
     ("|", PIPE);
     ("~", TILDE);
+    ("!", IMPOSSIBLE);
     (".", DOT);
   ]
 

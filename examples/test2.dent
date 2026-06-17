@@ -10,11 +10,14 @@ data Wrapper : U =
   | Left  : Boolean → Wrapper
   | Right : Boolean → Wrapper
 
+record MyRec =
+  constructor Rec
+  | x : Int
+  | y : Int
 
 data Nat : U =
   | Z : Nat
   | S : Nat → Nat
-
 
 (*
 dec chooseType : Wrapper → U
@@ -28,6 +31,9 @@ dec ( ∧ ) : Boolean → Boolean → Boolean
 def ( ∧ ) False r := False
 def ( ∧ ) l False := False
 def ( ∧ ) _ _ := True
+
+dec matchTest : MyRec → Int
+def matchTest (MyRec {x := x'; y := y'}) := x' + y'
 
 
 (*
@@ -62,13 +68,13 @@ def swap := λ _ _ (x × y). y × x
 
 (* RECORD TESTS *)
 (*
-record Bing : U =
+record Bing =
   constructor MkBing
   | v : Bool
 
 dec ( + ) : Int → Int → Int
 
-record Point : U =
+record Point =
   constructor MkPoint
   | x : Int
   | y : Int

@@ -29,17 +29,6 @@ type icit =
   | Imp
   | Exp
 
-type located_pattern = Location.t * pattern
-
-and pattern =
-  | PWild (* _ *)
-  | PConst of const
-  | PTypeLit of prim
-  | PVar of string
-  | PCtor of string * located_pattern list
-  | PTuple of located_pattern * located_pattern
-(*TODO: remove this to simply compiler implementation. *)
-
 type located_import = Location.t * import
 and import = ident * import_cond option
 
@@ -103,19 +92,6 @@ let pp_const out (c : const) =
   | Char c -> Format.fprintf out "'%s'" (Char.escaped c)
   | Bool b -> Format.fprintf out "%b" b
   | Unit -> Format.fprintf out "()"
-
-let rec pp_pattern out ((_, arg) : located_pattern) =
-  match arg with
-  | PConst c -> pp_const out c
-  | PTypeLit p -> pp_prim out p
-  | PWild -> Format.fprintf out "_"
-  | PTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
-  | PCtor (i, []) -> Format.fprintf out "%s" i
-  | PCtor (i, v) ->
-    Format.fprintf out "(%s %a)" i
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
-      v
-  | PVar i -> Format.fprintf out "%s" i
 
 let pp_import_cond out (cond : import_cond) =
   match cond with

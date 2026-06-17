@@ -9,14 +9,14 @@ and expr =
   (* we give each function a binder to distinguish between user-defined
      functions and builtins later on *)
   | Let of
-      located_pattern
+      located_expr
       * located_expr option
       * located_expr
       * located_expr (* let p₁ ... pₙ : <optional_ty> = e₁ in e₂ *)
   | Match of
-      located_expr * (located_pattern * located_expr option * located_expr) list
+      located_expr * (located_expr * located_expr option * located_expr) list
   | If of located_expr * located_expr * located_expr
-  | Lam of located_pattern * located_expr
+  | Lam of located_expr * located_expr
   | Const of const
   | Var of ident
   | TypeLit of prim
@@ -26,7 +26,9 @@ and expr =
   | RUpdate of string * (update_type * string * located_expr) list
     (* { x where y₁ = z₁; ...; yₙ = zₙ } *)
   | Hole (* _ *)
+  | Impossible (* ! - an impossible pattern *)
   | Annot of located_expr * located_expr (* e ~ t *)
+  | As of string * located_expr (* x@y *)
 
 and bind = string * icit (* identifier, icit type *)
 
@@ -52,7 +54,7 @@ and definition =
   | Dec of string * located_expr
   | Def of
       string
-      * located_pattern list
+      * located_expr list
       * located_expr option
       * located_expr
       * with_block
@@ -76,20 +78,20 @@ let rec pp_expr out ((_, e) : located_expr) =
   | Ap (_, f, arg) ->
     Format.fprintf out "(@[<hov>%a@ %@ %a@])" pp_expr f pp_expr arg
   | Let (p, ty, v, n) ->
-    Format.fprintf out "@[<v>@[<hov>let %a : %a = %a in@]@,%a@]" pp_pattern p
+    Format.fprintf out "@[<v>@[<hov>let %a : %a = %a in@]@,%a@]" pp_expr p
       Format.(
         pp_print_option ~none:(fun out () -> fprintf out "<none>") pp_expr)
       ty pp_expr v pp_expr n
   | If (cond, tbranch, fbranch) ->
     Format.fprintf out "i@[<v>f %a@,then@ %a@,else@ %a@]" pp_expr cond pp_expr
       tbranch pp_expr fbranch
-  | Lam (arg, body) -> Format.fprintf out "λ %a. %a" pp_pattern arg pp_expr body
+  | Lam (arg, body) -> Format.fprintf out "λ %a. %a" pp_expr arg pp_expr body
   | Match (cond, bs) ->
     let pp_branch out (p, wb, b) =
       Format.fprintf out "(wh@[<v>en %a@,(%a) ⇒ %a@])"
         Format.(
           pp_print_option ~none:(fun out () -> fprintf out "true") pp_expr)
-        wb pp_pattern p pp_expr b
+        wb pp_expr p pp_expr b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_expr cond
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
@@ -120,7 +122,9 @@ let rec pp_expr out ((_, e) : located_expr) =
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out ";@,") pp_field)
       fields
   | Hole -> Format.fprintf out "_"
+  | Impossible -> Format.fprintf out "!"
   | Annot (e, t) -> Format.fprintf out "(%a ~ %a)" pp_expr e pp_expr t
+  | As (i, p) -> Format.fprintf out "%s@(%a)" i pp_expr p
 
 let rec pp_ty_decl out ((_, (i, t)) : located_ty_decl) =
   match t with
@@ -157,7 +161,7 @@ let rec pp_definition out ((_, def) : located_definition) =
   | Dec (f, ts) -> Format.fprintf out "(dec %s @[<hov>%a@])" f pp_expr ts
   | Def (f, args, when_block, body, with_block) ->
     Format.fprintf out "(de@[<v>f %s (%a)@,%a@,%a@,%a@])" f
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
+      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_expr)
       args pp_when_block when_block pp_expr body pp_with_block with_block
 
 and pp_with_block out (with_block : with_block) =

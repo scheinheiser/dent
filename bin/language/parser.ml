@@ -15,7 +15,7 @@ let fresh =
   let i = ref (-1) in
   fun () ->
     incr i;
-    !i
+   !i
 
 let fresh_om () : operator_map = OM.empty
 let ( >>= ) = Base.Or_error.( >>= )
@@ -190,17 +190,17 @@ end = struct
     let open Token in
     let rec go acc ftokens = function
       | [] -> Ok (acc, List.rev ftokens)
-      | ((s, ATSIGN) as h) :: rest -> (
+      | ((_, ATSIGN) as h) :: rest -> (
         let l = {tokens = rest} in
         match () with
         | _ when matches l RASSOC ->
           skip ~am:1 l;
-          let* op, assoc, l' = parse_assoc l R s in
+          let* op, assoc, l' = parse_assoc l R in
           let acc' = OM.add op assoc acc in
           go acc' ftokens (get l')
         | _ when matches l LASSOC ->
           skip ~am:1 l;
-          let* op, assoc, l' = parse_assoc l L s in
+          let* op, assoc, l' = parse_assoc l L in
           let acc' = OM.add op assoc acc in
           go acc' ftokens (get l')
         | _ -> go acc (h :: ftokens) rest)
@@ -209,28 +209,24 @@ end = struct
     let@ om, r = go (fresh_om ()) [] tokens in
     (om, {tokens = r})
 
-  and parse_assoc (stream : t) (assoc : assoc) (s : Location.t) :
+  and parse_assoc (stream : t) (assoc : assoc) :
       (string * (int * assoc) * t) result =
     let* p =
       consume_with stream
         (function
-          | INT i -> Some i
+          | INT i when i > 1 && i < 10 -> Some i
           | _ -> None)
-        "Expected precedence after assoc keyword."
+        "Expected an integer precedence between 1-10 after assoc keyword."
     in
-    if p < 1 || p > 10 then
-      let loc = Location.combine s (current_pos stream) in
-      make_err (Some loc, "Operator precedence must lie within range 1-10.")
-    else
-      let@ o =
-        consume_with stream
-          (function
-            | OP o -> Some o
-            | IDENT i -> Some i
-            | _ -> None)
-          "Expected operator after precedence."
-      in
-      (o, (p, assoc), stream)
+    let@ o =
+      consume_with stream
+        (function
+          | OP o -> Some o
+          | IDENT i -> Some i
+          | _ -> None)
+        "Expected operator after precedence."
+    in
+    (o, (p, assoc), stream)
 end
 
 let ( <|> ) l r s = Lexer.attempt s l r
@@ -307,136 +303,6 @@ module Parser = struct
         | _ -> None)
       "Expected a user-defined operator."
 
-  let rec parse_args (l : Lexer.t) : located_pattern list Lexer.result =
-    Lexer.list_with_end l
-      (function
-        | WILDCARD
-        | LBRACK
-        | LPAREN
-        | IDENT _
-        | INT _
-        | FLOAT _
-        | STRING _
-        | CHAR _
-        | BOOL _
-        | ATSIGN
-        | UPPER_IDENT _
-        | UNIT -> false
-        | _ -> true)
-      parse_pattern
-
-  and parse_pattern (l : Lexer.t) : located_pattern Lexer.result =
-    match Lexer.advance l with
-    | s, LBRACK ->
-      let* r =
-        ( (fun l ->
-            let@ e =
-              Lexer.consume_with_pos l RBRACK
-                "Expected ']' to end empty list constructor."
-            in
-            (Location.combine s e, PVar "Nil"))
-        <|> fun l ->
-          let* es = Lexer.separated_list l ~sep:SEMI parse_pattern in
-          let@ e =
-            Lexer.consume_with_pos l RBRACK "Expected ']' to end list."
-          in
-          let loc = Location.combine s e in
-          List.fold_right
-            (fun n acc -> (loc, PCtor ("::", [n; acc])))
-            (List.tl es) (List.hd es) )
-          l
-      in
-      parse_pbop l r
-    | s, LPAREN -> (
-      match Lexer.current l with
-      | _, UPPER_IDENT i ->
-        Lexer.skip ~am:1 l;
-        let* ps =
-          ( (fun l -> Lexer.list_with_end l (( = ) RPAREN) parse_pattern)
-          <|> fun _ -> ok [] )
-            l
-        in
-        let* e =
-          Lexer.consume_with_pos l RPAREN
-            "Expected ')' to end parenthesised pattern."
-        in
-        parse_pbop l (Location.combine s e, PCtor (i, ps))
-      | _ -> (
-        let* l' = parse_pattern l in
-        match Lexer.current l with
-        | _, RPAREN ->
-          Lexer.skip ~am:1 l;
-          parse_pbop l l'
-        | pos, tok ->
-          Lexer.make_err
-            ( Some pos,
-              Printf.sprintf "Expected ')', but got '%s'." (Token.show tok) )))
-    | s, WILDCARD -> parse_pbop l (s, PWild)
-    | s, IDENT i -> parse_pbop l (s, PVar i)
-    | s, UPPER_IDENT i -> parse_pbop l (s, PCtor (i, []))
-    | s, INT i -> parse_pbop l (s, PConst (Int i))
-    | s, FLOAT i -> parse_pbop l (s, PConst (Float i))
-    | s, STRING i -> parse_pbop l (s, PConst (String i))
-    | s, CHAR i -> parse_pbop l (s, PConst (Char i))
-    | s, BOOL i -> parse_pbop l (s, PConst (Bool i))
-    | s, UNIT -> parse_pbop l (s, PConst Unit)
-    | s, TY_INT -> parse_pbop l (s, PTypeLit PInt)
-    | s, TY_FLOAT -> parse_pbop l (s, PTypeLit PFloat)
-    | s, TY_STRING -> parse_pbop l (s, PTypeLit PString)
-    | s, TY_CHAR -> parse_pbop l (s, PTypeLit PChar)
-    | s, TY_BOOL -> parse_pbop l (s, PTypeLit PBool)
-    | s, TY_UNIT -> parse_pbop l (s, PTypeLit PUnit)
-    | s, UNIVERSE ->
-      let* p =
-        ( (fun l ->
-            let e = Lexer.current_pos l in
-            let* n =
-              Lexer.consume_with l
-                (function
-                  | INT i -> Some i
-                  | _ -> None)
-                "Expected an integer for the universe level."
-            in
-            let loc = Location.combine s e in
-            if n < 0 then
-              Lexer.make_err
-                ( Some loc,
-                  Printf.sprintf
-                    "Expected a natural number for universe level, but got \
-                     '%d'."
-                    n )
-            else
-              ok (loc, PTypeLit (PUni n)))
-        <|> fun _ -> ok @@ (s, PTypeLit (PUni 0)) )
-          (* α : Type ⇒ α : Type 0 *)
-          l
-      in
-      parse_pbop l p
-    | pos, tok ->
-      Lexer.make_err
-        ( Some pos,
-          Printf.sprintf "Expected pattern, but got '%s'." (Token.show tok) )
-
-  and parse_pbop (l : Lexer.t) ((s, _) as left : located_pattern) :
-      located_pattern Lexer.result =
-    ( ( (fun l ->
-          let* o =
-            Lexer.consume_with l
-              (function
-                | OP o -> Some o
-                | ARROW -> Some "->"
-                | _ -> None)
-              "Expected operator."
-          in
-          let@ ((e, _) as next) = parse_pattern l in
-          (Location.combine s e, PCtor (o, [left; next])))
-      <|> fun l ->
-        let* _ = Lexer.consume l COMMA "Expected comma for a tuple pattern." in
-        let@ ((e, _) as r) = parse_pattern l in
-        (Location.combine s e, PTuple (left, r)) )
-    <|> fun _ -> ok left )
-      l
-
   (* https://www.youtube.com/watch?v=2l1Si4gSb9A *)
   let rec parse_expr (l : Lexer.t) (limit : int) (om : operator_map) :
       Ast.located_expr Lexer.result =
@@ -466,28 +332,7 @@ module Parser = struct
     | s, TY_CHAR -> ok (s, Ast.TypeLit PChar)
     | s, TY_BOOL -> ok (s, Ast.TypeLit PBool)
     | s, TY_UNIT -> ok (s, Ast.TypeLit PUnit)
-    | s, UNIVERSE ->
-      ( (fun l ->
-          let e = Lexer.current_pos l in
-          let* n =
-            Lexer.consume_with l
-              (function
-                | INT i -> Some i
-                | _ -> None)
-              "Expected an integer for the universe level."
-          in
-          let loc = Location.combine s e in
-          if n < 0 then
-            Lexer.make_err
-              ( Some loc,
-                Printf.sprintf
-                  "Expected a natural number for universe level, but got '%d'."
-                  n )
-          else
-            ok (loc, Ast.TypeLit (PUni n)))
-      <|> fun _ -> ok @@ (s, Ast.TypeLit (PUni 0)) )
-        (* α ~ U ⇒ α ~ U 0 *)
-        l
+    | s, UNIVERSE -> parse_universe_level l s
     | s, IDENT i -> ok (s, Ast.Var (Ident i))
     | s, UPPER_IDENT i ->
       ( (fun l ->
@@ -509,25 +354,7 @@ module Parser = struct
         in
         (Location.combine s e, ru) )
         l
-    | s, LBRACK ->
-      ( (fun l ->
-          let@ e =
-            Lexer.consume_with_pos l RBRACK
-              "Expected ']' to end empty list constructor."
-          in
-          let loc = Location.combine s e in
-          (loc, Ast.Var (Udc "Nil")))
-      <|> fun l ->
-        let* es =
-          Lexer.separated_list l ~sep:SEMI (fun e -> parse_expr e 0 om)
-        in
-        let@ e = Lexer.consume_with_pos l RBRACK "Expected ']' to end list." in
-        let loc = Location.combine s e in
-        let op = (loc, Ast.Var (Ident "::")) in
-        List.fold_right
-          (fun n acc -> (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, n)), acc)))
-          (List.tl es) (List.hd es) )
-        l
+    | s, LBRACK -> parse_list l om s
     | s, LPAREN ->
       ( ( (fun l ->
             let* o = parse_user_op l in
@@ -548,8 +375,7 @@ module Parser = struct
           Lexer.make_err
             ( Some pos,
               Printf.sprintf
-                "Expected either ')' to end grouped expression or ',' to start \
-                 tuple expression, but got '%s'."
+                "Expected ')' to end grouped expression, but got '%s'."
                 (Token.show tok) ) )
         l
     | s, OP o ->
@@ -618,54 +444,10 @@ module Parser = struct
         let r = (s, Ast.Var (AccessIdent (i, is))) in
         ok @@ Ast.Ap (0, left, r)
       | UNIVERSE ->
-        let@ r =
-          ( (fun l ->
-              let e = Lexer.current_pos l in
-              let* n =
-                Lexer.consume_with l
-                  (function
-                    | INT i -> Some i
-                    | _ -> None)
-                  "Expected an integer for the universe level."
-              in
-              let loc = Location.combine s e in
-              if n < 0 then
-                Lexer.make_err
-                  ( Some loc,
-                    Printf.sprintf
-                      "Expected a natural number for universe level, but got \
-                       '%d'."
-                      n )
-              else
-                ok (loc, Ast.TypeLit (PUni n)))
-          <|> fun _ -> ok @@ (s, Ast.TypeLit (PUni 0)) )
-            (* e ~ U ⇒ e ~ U 0 *)
-            l
-        in
+        let@ r = parse_universe_level l s in
         Ast.Ap (0, left, r)
       | LBRACK ->
-        let@ r =
-          ( (fun l ->
-              let@ e =
-                Lexer.consume_with_pos l RBRACK
-                  "Expected ']' to end empty list constructor."
-              in
-              let loc = Location.combine s e in
-              (loc, Ast.Var (Udc "Nil")))
-          <|> fun l ->
-            let* es =
-              Lexer.separated_list l ~sep:SEMI (fun e -> parse_expr e 0 om)
-            in
-            let@ e =
-              Lexer.consume_with_pos l RBRACK "Expected ']' to end list."
-            in
-            let loc = Location.combine s e in
-            let op = (loc, Ast.Var (Ident "::")) in
-            List.fold_right
-              (fun n acc -> (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, n)), acc)))
-              (List.tl es) (List.hd es) )
-            l
-        in
+        let@ r = parse_list l om s in
         Ast.Ap (0, left, r)
       | LBRACE ->
         let@ r =
@@ -702,8 +484,7 @@ module Parser = struct
             Lexer.make_err
               ( Some pos,
                 Printf.sprintf
-                  "Expected either ')' to end grouped expression or ',' to \
-                   start tuple expression, but got '%s'."
+                  "Expected ')' to end grouped expression, but got '%s'."
                   (Token.show tok) ) )
           l
       | op ->
@@ -713,6 +494,38 @@ module Parser = struct
           )
     in
     (Location.combine s (Lexer.current_pos l), expr)
+
+  and parse_universe_level (l: Lexer.t) (s: Location.t) : Ast.located_expr Lexer.result =
+    ((
+      fun l ->
+      let e = Lexer.current_pos l in
+      let@ n = Lexer.consume_with l (function | INT n when n >= 0 -> Some n | _ -> None) "Expected a non-negative integer for the universe level." in
+      Location.combine s e, Ast.TypeLit (PUni n)
+    )
+     <|>
+       (fun _ ->
+         ok (s, Ast.TypeLit (PUni 0)))) (* e ~ U ==> e ~ U 0 *)
+      l
+
+  and parse_list (l: Lexer.t) (om : operator_map) (s: Location.t) : Ast.located_expr Lexer.result =
+          ( (fun l ->
+          let@ e =
+            Lexer.consume_with_pos l RBRACK
+              "Expected ']' to end empty list constructor."
+          in
+          let loc = Location.combine s e in
+          (loc, Ast.Var (Udc "Nil")))
+      <|> fun l ->
+        let* es =
+          Lexer.separated_list l ~sep:SEMI (fun e -> parse_expr e 0 om)
+        in
+        let@ e = Lexer.consume_with_pos l RBRACK "Expected ']' to end list." in
+        let loc = Location.combine s e in
+        let op = (loc, Ast.Var (Ident "::")) in
+        List.fold_right
+          (fun n acc -> (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, n)), acc)))
+          (List.tl es) (List.hd es) )
+        l
 
   and parse_binding (l : Lexer.t) ~(icit : icit) (s : Location.t)
       (om : operator_map) : Ast.located_expr Lexer.result =
@@ -851,7 +664,7 @@ module Parser = struct
 
   and parse_let (l : Lexer.t) (om : operator_map) (s : Location.t) :
       Ast.located_expr Lexer.result =
-    let* p = parse_pattern l in
+    let* p = parse_pattern l om in
     let* ty =
       match Lexer.current l with
       | _, COLON ->
@@ -893,7 +706,7 @@ module Parser = struct
 
   and parse_lam (l : Lexer.t) (om : operator_map) (s : Location.t) :
       Ast.located_expr Lexer.result =
-    let* args = parse_args l in
+    let* args = parse_args l om in
     let* _ = Lexer.consume l DOT "Expected '.' after lambda arguments." in
     let@ b = parse_expr l 0 om in
     let loc = Location.combine s (Lexer.current_pos l) in
@@ -904,7 +717,7 @@ module Parser = struct
     let* expr = parse_expr l 0 om in
     let* _ = Lexer.consume l TO "Expected 'to' after match subject." in
     let go l =
-      let* p = parse_pattern l in
+      let* p = parse_pattern l om in
       let* wb =
         match Lexer.current l with
         | _, WHEN ->
@@ -923,6 +736,107 @@ module Parser = struct
     let@ branches = Lexer.separated_list l ~sep:PIPE go in
     (Location.combine s (Lexer.current_pos l), Ast.Match (expr, branches))
 
+  and parse_args (l: Lexer.t) (om: operator_map) : (Ast.located_expr list) Lexer.result =
+    Lexer.list_with_end l
+      (function
+        | WILDCARD
+        | IMPOSSIBLE
+        | LBRACK
+        | LPAREN
+        | IDENT _
+        | INT _
+        | FLOAT _
+        | STRING _
+        | CHAR _
+        | BOOL _
+        | ATSIGN
+        | UPPER_IDENT _
+        | UNIT
+        | TY_UNIT
+        | TY_INT
+        | TY_FLOAT
+        | TY_CHAR
+        | TY_STRING
+        | TY_BOOL
+        | UNIVERSE -> false
+        | _ -> true)
+      (flip parse_pattern om)
+
+  and parse_pattern ?(parse_ctor = false, None) (l: Lexer.t) (om : operator_map) : Ast.located_expr Lexer.result =
+    let should_parse_ctor, end_ = parse_ctor in
+    let* p =
+    match Lexer.advance l with
+      | s, WILDCARD ->  ok (s, Ast.Hole)
+      | s, IMPOSSIBLE -> ok (s, Ast.Impossible)
+      | s, IDENT i ->
+         ((fun l ->
+           let* i = parse_lower_ident l in
+           let* _ = Lexer.consume l ATSIGN "Expected '@' after identifier in as-pattern." in
+           let@ (e, _) as p = parse_pattern l om in
+           Location.combine s e, Ast.As (i, p))
+         <|>
+         (fun _ -> ok (s, Ast.Var (Ident i)))) l
+      | s, UPPER_IDENT i ->
+         if not should_parse_ctor
+         then (((fun l ->
+           let@ e, fs = parse_record_fields l om in
+           Location.combine s e, Ast.RCons (i, fs))
+         <|>
+           (fun _ -> ok (s, Ast.Var (Udc i)))) l)
+         else
+           let end_ = Option.get end_ in
+           ((fun l ->
+             let@ e, fs = parse_record_fields l om in
+             Location.combine s e, Ast.RCons (i, fs))
+           <|>
+             (fun l ->
+               let* ps = Lexer.list_with_end l ((=) end_) (flip parse_pattern om) in
+               let@ e = Lexer.consume_with_pos l end_ (Printf.sprintf "Expected '%s' to end constructor list." (Token.show end_)) in
+              let loc = Location.combine s e in
+              List.fold_left (fun ap n -> loc, Ast.Ap (0, ap, n)) (loc, Ast.Var (Udc i)) ps)
+           <|>
+             (fun _ -> ok (s, Ast.Var (Udc i)))) l
+      | s, INT n ->  ok (s, Ast.Const (Int n))
+      | s, FLOAT f ->  ok (s, Ast.Const (Float f))
+      | s, CHAR c ->  ok (s, Ast.Const (Char c))
+      | s, STRING s' -> ok (s, Ast.Const (String s'))
+      | s, BOOL b -> ok (s, Ast.Const (Bool b))
+      | s, UNIT -> ok (s, Ast.Const Unit)
+      | s, TY_INT -> ok (s, Ast.TypeLit PInt)
+      | s, TY_FLOAT -> ok (s, Ast.TypeLit PFloat)
+      | s, TY_CHAR -> ok (s, Ast.TypeLit PChar)
+      | s, TY_STRING -> ok (s, Ast.TypeLit PString)
+      | s, TY_BOOL -> ok (s, Ast.TypeLit PBool)
+      | s, TY_UNIT -> ok (s, Ast.TypeLit PUnit)
+      | s, UNIVERSE -> parse_universe_level l s
+      | s, LBRACK -> parse_list l om s
+      | _, LPAREN ->
+         let* p = parse_pattern ~parse_ctor:(true, Some RPAREN) l om in
+         let@ _ = Lexer.consume l RPAREN "Expected ')' to end parenthesised pattern." in
+         p
+      | loc, t -> Lexer.make_err (Some loc, Printf.sprintf "Expected a pattern, but got '%s'." (Token.show t))
+    in parse_pat_led l p om
+
+  and parse_pat_led (l: Lexer.t) ((s, _) as left: Ast.located_expr) (om : operator_map) : Ast.located_expr Lexer.result =
+    ((fun l ->
+      let* _ = Lexer.consume l ARROW "Expected '->' or '→' for a Pi pattern." in
+      let@ (e, _) as r = parse_pattern l om in
+      Location.combine s e, Ast.Pi (("_", Exp), left, r))
+    <|>
+      (fun l ->
+        let* _ = Lexer.consume l COMMA "Expected ',' for a tuple pattern." in
+        let@ (e, _) as r = parse_pattern l om in
+        Location.combine s e, Ast.Tuple (left, r))
+    <|>
+      (fun l ->
+        let* o = parse_user_op l in
+        let@ (e, _) as r = parse_pattern l om in
+        let loc = Location.combine s e in
+        let op = loc, Ast.Var (Udc o) in
+        loc, Ast.Ap (0, (loc, Ast.Ap (0, op, left)), r))
+    <|>
+      (fun _ -> ok left)) l
+
   let rec parse_definition (l : Lexer.t) (om : operator_map) :
       Ast.located_definition Lexer.result =
     match Lexer.current l with
@@ -940,7 +854,7 @@ module Parser = struct
       Ast.located_definition Lexer.result =
     let* s = Lexer.consume_with_pos l DEF "Expected 'def' keyword." in
     let* n = parse_definition_ident l in
-    let* args = parse_args l in
+    let* args = parse_args l om in
     let* when_block =
       match Lexer.current l with
       | _, COLON ->
@@ -1076,11 +990,8 @@ module Parser = struct
 
   and parse_record (l : Lexer.t) (om : operator_map) :
       (Location.t * string * Ast.tdecl_type) Lexer.result =
-    let* ident = parse_upper_ident l in
     let* s = Lexer.consume_with_pos l RECORD "Expected record keyword." in
-    let* _ =
-      Lexer.consume l COLON "Expected a ':' before record type signature."
-    in
+    let* ident = parse_upper_ident l in
     let* tvs = Lexer.list_with_end l (( = ) EQ) (flip parse_type_ident om) in
     let* _ = Lexer.consume l EQ "Expected a '=' after record type signature." in
     let* _ =
