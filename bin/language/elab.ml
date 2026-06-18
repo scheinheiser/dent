@@ -23,6 +23,7 @@ module SM = Map.Make (String)
 
 (* matching patterns *)
 type located_pattern = Location.t * pattern
+
 and pattern =
   | PWild (* _ *)
   | PAbs (* ! - an impossible pattern *)
@@ -115,7 +116,7 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
   | PCtor (i, v) ->
     Format.fprintf out "(%s %a)" i
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
-     v
+      v
   | PVar i -> Format.fprintf out "%s" i
 
 let rec pp_tm out (tm : tm) =
@@ -266,8 +267,10 @@ and v_ap_bds env bds m =
     | B -> v_ap (v_ap_bds env bds m) e
     | D -> v_ap_bds env bds m)
   | _ ->
-     Log.dbg None (Format.asprintf "env, bds := %d, %d@." (Snoc.length env) (Snoc.length bds));
-     Error.internal "Mismatched env/bds list."
+    Log.dbg None
+      (Format.asprintf "env, bds := %d, %d@." (Snoc.length env)
+         (Snoc.length bds));
+    Error.internal "Mismatched env/bds list."
 
 (* reduce a metavariable if possible *)
 let force = function
@@ -320,8 +323,8 @@ let rec quote (lvl : lvl) (v : val_) : tm =
         | PWild | PTypeLit _ | PConst _ | PAbs -> (env, l)
         | PVar i -> (env @> VLocal (i, l, Snoc.empty), l + 1)
         | PAs (i, p) ->
-           let env, l = build_env env p l in
-           (env @> VLocal (i, l, Snoc.empty), l + 1)
+          let env, l = build_env env p l in
+          (env @> VLocal (i, l, Snoc.empty), l + 1)
         | PTuple (l', r) ->
           let env, l = build_env env l' l in
           build_env env r l
@@ -633,7 +636,7 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
       err (Some ctx.loc, "Rigid mismatch in unification.")
   in
   match (force l, force r) with
-  | VTypeLit l, VTypeLit r when l #= r -> some ()
+  | VTypeLit l, VTypeLit r when l#=r -> some ()
   | VConst l, VConst r when l %= r -> some ()
   | VTuple (l, r), VTuple (l', r') ->
     let* _ = unify ctx l l' in
@@ -725,11 +728,12 @@ and unify_pat ctx l r : unit result =
           "Pa@[<v 4>ttern unification failed:@,Expected → %a@,Received → %a@,@]"
           pp_pattern l pp_pattern r )
 
-let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) : located_pattern result =
+let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) :
+    located_pattern result =
   let rec flatten (_, ap) acc =
     match ap with
     | Ast.Ap (_, rest, s) -> flatten rest (acc @> s)
-    | e -> e, acc
+    | e -> (e, acc)
   in
   let@ p =
     match e with
@@ -740,34 +744,47 @@ let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) : located_pattern r
     | Ast.Var (Ident i) -> Some (PVar i)
     | Ast.Var (Udc i) -> Some (PCtor (i, []))
     | Ast.Tuple (l, r) ->
-       let* l = to_pattern ctx l in
-       let@ r = to_pattern ctx r in
-       PTuple (l, r)
+      let* l = to_pattern ctx l in
+      let@ r = to_pattern ctx r in
+      PTuple (l, r)
     | Ast.As (i, p) ->
-       let@ p = to_pattern ctx p in
-       PAs (i, p)
+      let@ p = to_pattern ctx p in
+      PAs (i, p)
     | Ast.RCons (cons, fs) ->
-       let* _, ex_fs, _ = lookup_rcon cons ctx in
-       let@ fs =
-         List.map
-           (fun (i, _) ->
-             match List.find_opt (fun (i', _) -> i = i') fs with
-             | Some (_, p) ->
-                (*TODO: check that the pattern is the right type for the field. *)
-                to_pattern ctx p
-             | None -> Some (loc, PWild))
-         ex_fs |> combine_errors
-       in
-       PCtor (cons, fs)
+      let* _, ex_fs, _ = lookup_rcon cons ctx in
+      let@ fs =
+        List.map
+          (fun (i, _) ->
+            match List.find_opt (fun (i', _) -> i = i') fs with
+            | Some (_, p) ->
+              (*TODO: check that the pattern is the right type for the field. *)
+              to_pattern ctx p
+            | None -> Some (loc, PWild))
+          ex_fs
+        |> combine_errors
+      in
+      PCtor (cons, fs)
     | Ast.Ap (_, _, _) as ap -> (
-       let base, args = flatten (loc, ap) Snoc.empty in
-       match base with
-       | Ast.Var (Udc i) ->
-          let@ ps = List.map (to_pattern ctx) (Snoc.to_list args) |> combine_errors in
-          PCtor (i, ps)
-       | e -> err (Some loc, Format.asprintf "Ex@[<v 2>pected a type constructor:@,Received → %a@]@." Ast.pp_expr (loc, e)))
-    | e -> err (Some loc, Format.asprintf "Ex@[<v 2>pected a pattern:@,Received → %a@]@." Ast.pp_expr (loc, e))
-  in loc, p
+      let base, args = flatten (loc, ap) Snoc.empty in
+      match base with
+      | Ast.Var (Udc i) ->
+        let@ ps =
+          List.map (to_pattern ctx) (Snoc.to_list args) |> combine_errors
+        in
+        PCtor (i, ps)
+      | e ->
+        err
+          ( Some loc,
+            Format.asprintf
+              "Ex@[<v 2>pected a type constructor:@,Received → %a@]@."
+              Ast.pp_expr (loc, e) ))
+    | e ->
+      err
+        ( Some loc,
+          Format.asprintf "Ex@[<v 2>pected a pattern:@,Received → %a@]@."
+            Ast.pp_expr (loc, e) )
+  in
+  (loc, p)
 
 let fresh_pattern_var () : string = "pat$" ^ (fresh_i () |> string_of_int)
 let fresh_bind_var () : string = "b$" ^ (fresh_i () |> string_of_int)
@@ -829,7 +846,8 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
           in
           let@ p = to_pattern ctx p in
           (singleton (c_id, p, t), Snoc.empty, wb, b))
-        bs |> combine_errors
+        bs
+      |> combine_errors
     in
     let ctx = bind_var ~id:c_id ~t ctx in
     let@ ctree = build_tree ctx {clauses = cs; target = t'} in
@@ -1027,12 +1045,14 @@ and infer_universe ctx = function
     let@ n' = infer_universe ctx r in
     Int.max n n'
   | VTop (i, _) -> (
-     match lookup_top i ctx with
-     | None -> err (Some ctx.loc, Printf.sprintf "Undefined identifier - '%s'\n" i)
-     | Some (_, t) ->
-        Log.dbg None (Format.asprintf "t := %a@." pp_val t);
-        infer_universe ctx t)
-  | v -> err (Some ctx.loc, Format.asprintf "Expected a Type, but got %a." pp_val v)
+    match lookup_top i ctx with
+    | None ->
+      err (Some ctx.loc, Printf.sprintf "Undefined identifier - '%s'\n" i)
+    | Some (_, t) ->
+      Log.dbg None (Format.asprintf "t := %a@." pp_val t);
+      infer_universe ctx t)
+  | v ->
+    err (Some ctx.loc, Format.asprintf "Expected a Type, but got %a." pp_val v)
 
 and is_type (ctx : ctx) (e : Ast.located_expr) : (tm * int) result =
   let* t, tty = infer ctx e in
@@ -1048,7 +1068,11 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     match lookup_top i ctx with
     | None -> err (Some loc, Printf.sprintf "Undefined identifier - '%s'\n" i)
     | Some (DCon (i, _), ty) | Some (RCon (i, _), ty) -> Some (i, ty)
-    | Some _ -> err (Some loc, Printf.sprintf "Expected type/record constructor, but got '%s'.\n" i)
+    | Some _ ->
+      err
+        ( Some loc,
+          Printf.sprintf "Expected type/record constructor, but got '%s'.\n" i
+        )
   in
   let rec find_split cs =
     let open Snoc in
@@ -1124,7 +1148,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     | None -> done_ ctx target constrs c_wb c_body
     | Some (sc, (loc, p), _) -> (
       match p with
-      | PCtor (c, _) -> (
+      | PCtor (c, _) ->
         let* dcon, _ = lookup_con loc c ctx in
         let clauses_matched_on clauses nm =
           let rec go cs nm acc =
@@ -1178,16 +1202,15 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             | Snoc.Lin -> some acc
             | Snoc.Snoc (cs, ((n, (loc, p), _) as constr)) when n = sc -> (
               match p with
-              | PConst _ | PTypeLit _ ->
-                Error.internal "splittable in splitted"
+              | PConst _ | PTypeLit _ -> Error.internal "splittable in splitted"
               | PCtor (c', old) ->
-               let* got, _ = lookup_con loc c' ctx in
+                let* got, _ = lookup_con loc c' ctx in
                 if got <> dcon then
                   err
                     ( Some loc,
                       Printf.sprintf
-                        "Expected a constructor from %s, but got a \
-                         constructor from %s."
+                        "Expected a constructor from %s, but got a constructor \
+                         from %s."
                         dcon got )
                 else if dc <> c' then
                   None
@@ -1225,7 +1248,9 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                 Printf.sprintf "%s %s %s." (String.concat ", " cs) bridge dcon
               )
         in
-        Log.dbg None (Printf.sprintf "hit, missed := %d, %d\n" (List.length hit) (List.length missed));
+        Log.dbg None
+          (Printf.sprintf "hit, missed := %d, %d\n" (List.length hit)
+             (List.length missed));
         let* sctm =
           let@ n, _ = lookup_local sc ctx in
           Local (sc, n)
@@ -1257,9 +1282,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             let clauses =
               List.filter
                 (fun (constrs, _, _, _) ->
-                  match
-                    Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs
-                  with
+                  match Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs with
                   | Some (_, (_, PWild), _) -> true
                   | Some (_, (_, PVar _), _) -> true
                   | None -> true
@@ -1292,7 +1315,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         in
         let t = Match (sctm, hit) in
         (* kinda hacky to get β reduction on lambdas *)
-        eval ctx.env t |> quote ctx.lvl)
+        eval ctx.env t |> quote ctx.lvl
       | _ -> Error.internal "unsplittable pattern from find_split."))
   | _ -> Error.todo "bing"
 
@@ -1374,11 +1397,11 @@ and check_locals ctx locals =
         let args = List.map (to_pattern ctx) args |> combine_errors in
         match args with
         | None -> go ctx (None :: acc) ds
-        | Some args ->
-          let d = loc, (i, args, wb, b, locals) in
+        | Some args -> (
+          let d = (loc, (i, args, wb, b, locals)) in
           match check_definition ctx d with
           | Some (d, ctx) -> go ctx (Some d :: acc) ds
-          | None -> go ctx (None :: acc) ds)
+          | None -> go ctx (None :: acc) ds))
     in
     let r, ctx =
       List.filter_map
@@ -1541,7 +1564,8 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let defs =
       List.filter_map
         (function
-          | loc, Ast.Def (i, args, wb, b, locals) -> Some (loc, (i, args, wb, b, locals))
+          | loc, Ast.Def (i, args, wb, b, locals) ->
+            Some (loc, (i, args, wb, b, locals))
           | _ -> None)
         defs
     in
@@ -1549,8 +1573,9 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
       List.map
         (fun (loc, (i, args, wb, b, locals)) ->
           let@ args = List.map (to_pattern ctx) args |> combine_errors in
-          loc, (i, args, wb, b, locals))
-        defs |> combine_errors
+          (loc, (i, args, wb, b, locals)))
+        defs
+      |> combine_errors
     in
     let rec go ctx acc = function
       | [] -> acc
