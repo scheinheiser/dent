@@ -18,8 +18,6 @@ let fresh =
     !i
 
 let fresh_om () : operator_map = OM.empty
-let ( >>= ) = Base.Or_error.( >>= )
-let ( >>| ) = Base.Or_error.( >>| )
 let ( let* ) = Base.Or_error.( >>= )
 let ( let@ ) = Base.Or_error.( >>| )
 let id = Fun.id
@@ -149,7 +147,8 @@ end = struct
       else
         Result.Ok (v :: acc)
     in
-    aux [] >>| List.rev
+    let@ r = aux [] in
+    List.rev r
 
   let list_with_end (stream : t) (is_end : Token.token -> bool)
       (p : t -> 'a result) : 'a list result =
@@ -766,9 +765,8 @@ module Parser = struct
         | _ -> true)
       (flip parse_pattern om)
 
-  and parse_pattern ?(parse_ctor = (false, None)) (l : Lexer.t)
-      (om : operator_map) : Ast.located_expr Lexer.result =
-    let should_parse_ctor, end_ = parse_ctor in
+  and parse_pattern ?(ctor_delim = None) (l : Lexer.t) (om : operator_map) :
+      Ast.located_expr Lexer.result =
     let* p =
       match Lexer.advance l with
       | s, WILDCARD -> ok (s, Ast.Hole)
@@ -785,18 +783,15 @@ module Parser = struct
         <|> fun _ -> ok (s, Ast.Var (Ident i)) )
           l
       | s, UPPER_IDENT i ->
-        if not should_parse_ctor then
-          ( (fun l ->
+        ( ( (fun l ->
               let@ e, fs = parse_record_fields l om in
               (Location.combine s e, Ast.RCons (i, fs)))
-          <|> fun _ -> ok (s, Ast.Var (Udc i)) )
-            l
-        else
-          let end_ = Option.get end_ in
-          ( ( (fun l ->
-                let@ e, fs = parse_record_fields l om in
-                (Location.combine s e, Ast.RCons (i, fs)))
-            <|> fun l ->
+          <|> fun l ->
+            match ctor_delim with
+            | None ->
+              Lexer.make_err (None, "")
+              (* empty error to move to attempting the next parser *)
+            | Some end_ ->
               let@ ps =
                 Lexer.list_with_end l (( = ) end_) (flip parse_pattern om)
               in
@@ -804,8 +799,8 @@ module Parser = struct
               List.fold_left
                 (fun ap n -> (loc, Ast.Ap (0, ap, n)))
                 (loc, Ast.Var (Udc i)) ps )
-          <|> fun _ -> ok (s, Ast.Var (Udc i)) )
-            l
+        <|> fun _ -> ok (s, Ast.Var (Udc i)) )
+          l
       | s, INT n -> ok (s, Ast.Const (Int n))
       | s, FLOAT f -> ok (s, Ast.Const (Float f))
       | s, CHAR c -> ok (s, Ast.Const (Char c))
@@ -821,7 +816,7 @@ module Parser = struct
       | s, UNIVERSE -> parse_universe_level l s
       | s, LBRACK -> parse_list l om s
       | _, LPAREN ->
-        let* p = parse_pattern ~parse_ctor:(true, Some RPAREN) l om in
+        let* p = parse_pattern ~ctor_delim:(Some RPAREN) l om in
         let@ _ =
           Lexer.consume l RPAREN "Expected ')' to end parenthesised pattern."
         in

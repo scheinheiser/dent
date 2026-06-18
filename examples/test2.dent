@@ -1,7 +1,7 @@
 module T
 
 (* ALIAS TESTS - WORKING *)
-
+(*
 data Boolean : U =
   | True  : Boolean
   | False : Boolean
@@ -19,7 +19,6 @@ data Nat : U =
   | Z : Nat
   | S : Nat → Nat
 
-(*
 dec chooseType : Wrapper → U
 def chooseType (Left True) := String
 def chooseType (Left False) := Int
@@ -27,10 +26,11 @@ def chooseType (Right True) := Bool
 def chooseType (Right False) := Float
 *)
 
-dec ( + ) : Int → Int → Int
+dec testMatch : String → Int
+def testMatch "0" := 10
+def testMatch "1" := 20
+def testMatch _ := 30
 
-dec matchTest : MyRec → Int
-def matchTest (Rec { x; y }) := x + y
 
 (*
 dec plus : Nat → Nat → Nat

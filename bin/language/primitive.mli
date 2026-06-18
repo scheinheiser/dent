@@ -36,11 +36,12 @@ and import_cond =
   | CWithout of ident list
 
 (* const *)
-val const_equality : const -> const -> bool
+val equal_const : const -> const -> bool
 val ( %= ) : const -> const -> bool
+val show_const : const -> string (* shows the name of the constant *)
 
 (* prims *)
-val prim_equality : prim -> prim -> bool
+val equal_prim : prim -> prim -> bool
 val ( #= ) : prim -> prim -> bool
 val show_prim : prim -> string
 

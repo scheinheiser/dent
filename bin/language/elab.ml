@@ -701,7 +701,15 @@ and equal_pat ctx (_, l) (_, r) : bool result =
   match (l, r) with
   | PWild, _ | _, PWild -> Some true
   | PVar _, _ | _, PVar _ -> Some true
-  | PConst l, PConst r when l %= r -> Some true
+  | PConst l, PConst r -> (
+    match (l, r) with
+    | Int _, Int _
+    | Float _, Float _
+    | String _, String _
+    | Char _, Char _
+    | Bool _, Bool _
+    | Unit, Unit -> Some true
+    | _ -> Some false)
   | PTypeLit l, PTypeLit r when l#=r -> Some true
   | PAbs, PAbs -> Some true
   | PTuple (l, r), PTuple (l', r') ->
@@ -1078,7 +1086,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     let open Snoc in
     match cs with
     | Lin -> None
-    | Snoc (_, ((_, (_, PCtor _), _) as c)) -> Some c
+    | Snoc (_, ((_, (_, PCtor _), _) as c))
+    | Snoc (_, ((_, (_, PConst _), _) as c)) -> Some c
     | Snoc (cs, _) -> find_split cs
     (*TODO: split on literals, types (?) *)
   in
@@ -1147,6 +1156,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     match find_split constrs with
     | None -> done_ ctx target constrs c_wb c_body
     | Some (sc, (loc, p), _) -> (
+      let ctx = update_loc loc ctx in
       match p with
       | PCtor (c, _) ->
         let* dcon, _ = lookup_con loc c ctx in
@@ -1248,9 +1258,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                 Printf.sprintf "%s %s %s." (String.concat ", " cs) bridge dcon
               )
         in
-        Log.dbg None
-          (Printf.sprintf "hit, missed := %d, %d\n" (List.length hit)
-             (List.length missed));
         let* sctm =
           let@ n, _ = lookup_local sc ctx in
           Local (sc, n)
@@ -1294,7 +1301,9 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             | [] ->
               Log.warn
                 ( Some ctx.loc,
-                  Printf.sprintf "Missing cases for the constructor(s): %s\n"
+                  Format.asprintf
+                    "Fo@[<v 4>und a non-exhaustive pattern.@,\
+                     Missing cases for the constructor(s): %s@.@]"
                     (String.concat ", " missed) );
               let hole = gen_mv ctx.bds in
               add_hole (loc, (eval Snoc.empty hole, prob.target));
@@ -1315,6 +1324,164 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         in
         let t = Match (sctm, hit) in
         (* kinda hacky to get β reduction on lambdas *)
+        eval ctx.env t |> quote ctx.lvl
+      | PConst c ->
+        let equal_const l r =
+          match (l, r) with
+          | Int _, Int _
+          | Float _, Float _
+          | String _, String _
+          | Char _, Char _
+          | Bool _, Bool _
+          | Unit, Unit -> true
+          | _ -> false
+        in
+        let clauses_matched_on clauses nm =
+          let rec go cs nm acc =
+            match cs with
+            | [] -> acc
+            | (constrs, _, _, _) :: cs -> (
+              match Snoc.find_opt (fun (n, _, _) -> n = nm) constrs with
+              | None -> go cs nm acc
+              | Some (_, (_, PConst c), _) -> go cs nm (c :: acc)
+              | Some _ -> go cs nm acc)
+          in
+          go clauses nm []
+        in
+        let rewrite_constr ctx constr const =
+          let rec go ctx cs acc =
+            match cs with
+            | Snoc.Lin -> some acc
+            | Snoc.Snoc (cs, ((n, (loc, p), _) as constr)) when n = sc -> (
+              match p with
+              | PTypeLit _ | PCtor _ -> Error.internal "splittable in splitted"
+              | PConst c' ->
+                if not (equal_const const c') then
+                  err
+                    ( Some loc,
+                      Printf.sprintf "Expected %s, but got %s"
+                        (show_const const) (show_const c') )
+                else if not (const %= c') then
+                  None
+                else
+                  some (acc <@ cs)
+              | _ -> some ((acc <@ cs) @> constr))
+            | Snoc.Snoc (cs, c) -> go ctx cs (acc @> c)
+          in
+          go ctx constr Snoc.empty
+        in
+        let* hit =
+          let hit, missed =
+            clauses_matched_on prob.clauses sc
+            |> List.partition (fun c' -> equal_const c c')
+          in
+          match missed with
+          | [] -> some hit
+          | lits ->
+            let fmt_missed lits =
+              List.map (fun c -> Printf.sprintf "a %s" (show_const c)) lits
+              |> String.concat ", "
+            in
+            err
+              ( Some loc,
+                Printf.sprintf "Expected a %s pattern, but got %s pattern(s)."
+                  (show_const c) (fmt_missed lits) )
+        in
+        let* sctm =
+          let@ n, _ = lookup_local sc ctx in
+          Local (sc, n)
+        in
+        let@ cases =
+          let rec build_cases c_acc = function
+            | [] -> some c_acc
+            | const :: cs ->
+              let* clauses =
+                List.filter_map
+                  (fun (constr, ps, wb, b) ->
+                    let@ constr = rewrite_constr ctx constr const in
+                    Some (constr, ps, wb, b))
+                  prob.clauses
+                |> combine_errors
+              in
+              let* t = build_tree ctx {clauses; target = prob.target} in
+              let c = ((loc, PConst const), Const (Bool true), t) in
+              build_cases (c :: c_acc) cs
+          in
+          let build_default_case ctx =
+            let get_default cs =
+              let fail () = Error.internal "failed to remove unequal consts." in
+              match c with
+              | Unit -> "()"
+              | Bool b -> Printf.sprintf "%B" (not b)
+              | String _ ->
+                let cs =
+                  List.map
+                    (function
+                      | String s -> s
+                      | _ -> fail ())
+                    cs
+                in
+                List.fold_left (fun d s -> if d = s then d ^ "_" else d) "" cs
+              | Char _ ->
+                let incr c = Char.code c |> ( + ) 1 |> Char.chr in
+                let cs =
+                  List.map
+                    (function
+                      | Char c -> c
+                      | _ -> fail ())
+                    cs
+                in
+                List.fold_left (fun d s -> if d = s then incr d else d) '_' cs
+                |> Char.escaped
+              | Float _ ->
+                let cs =
+                  List.map
+                    (function
+                      | Float f -> f
+                      | _ -> fail ())
+                    cs
+                in
+                List.fold_left (fun d s -> if d = s then 1. +. d else d) 0. cs
+                |> string_of_float
+              | Int _ ->
+                let cs =
+                  List.map
+                    (function
+                      | Int i -> i
+                      | _ -> fail ())
+                    cs
+                in
+                List.fold_left (fun d s -> if d = s then d + 1 else d) 0 cs
+                |> string_of_int
+            in
+            let clauses =
+              List.filter
+                (fun (constrs, _, _, _) ->
+                  match Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs with
+                  | Some (_, (_, PWild), _) | Some (_, (_, PVar _), _) -> true
+                  | _ -> false)
+                prob.clauses
+            in
+            match clauses with
+            | [] ->
+              err
+                ( Some loc,
+                  Format.asprintf
+                    "Fo@[<v 4>und a non-exhaustive pattern.@,\
+                     Here is an example of an unmatched case: %S@]@."
+                    (get_default hit) )
+            | _ ->
+              let@ tree =
+                build_tree ctx
+                  {clauses = List.rev clauses; target = prob.target}
+              in
+              ((loc, PWild), Const (Bool true), tree)
+          in
+          let* bcs = build_cases [] hit in
+          let@ def = build_default_case ctx in
+          bcs @ [def]
+        in
+        let t = Match (sctm, cases) in
         eval ctx.env t |> quote ctx.lvl
       | _ -> Error.internal "unsplittable pattern from find_split."))
   | _ -> Error.todo "bing"
@@ -1347,6 +1514,7 @@ and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
     match matched with
     | [] -> check_definition ctx def
     | ms' ->
+      let ms' = List.rev ms' in
       let ms =
         List.map
           (fun (_, (_, args, wb, ((loc, _) as b), _)) ->

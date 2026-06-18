@@ -37,7 +37,7 @@ and import_cond =
   | CWithout of ident list
 
 (* utils *)
-let rec const_equality l r =
+let rec equal_const l r =
   match (l, r) with
   | Int l, Int r -> l = r
   | Float l, Float r -> l = r
@@ -47,9 +47,17 @@ let rec const_equality l r =
   | Unit, Unit -> true
   | _ -> false
 
-and ( %= ) l r = const_equality l r
+and ( %= ) l r = equal_const l r
 
-let rec prim_equality l r =
+let show_const = function
+  | Int _ -> "Int"
+  | Float _ -> "Float"
+  | String _ -> "String"
+  | Char _ -> "Char"
+  | Bool _ -> "Bool"
+  | Unit -> "Unit"
+
+let rec equal_prim l r =
   match (l, r) with
   | PInt, PInt
   | PFloat, PFloat
@@ -60,7 +68,7 @@ let rec prim_equality l r =
   | PUni n, PUni n' -> n <= n'
   | _ -> false
 
-and ( #= ) l r = prim_equality l r
+and ( #= ) l r = equal_prim l r
 
 let show_prim = function
   | PInt -> "Int"
