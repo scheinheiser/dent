@@ -27,14 +27,10 @@ def chooseType (Right True) := Bool
 def chooseType (Right False) := Float
 *)
 
-dec ( ∧ ) : Boolean → Boolean → Boolean
-def ( ∧ ) False r := False
-def ( ∧ ) l False := False
-def ( ∧ ) _ _ := True
+dec ( + ) : Int → Int → Int
 
 dec matchTest : MyRec → Int
-def matchTest (MyRec {x := x'; y := y'}) := x' + y'
-
+def matchTest (Rec { x; y }) := x + y
 
 (*
 dec plus : Nat → Nat → Nat

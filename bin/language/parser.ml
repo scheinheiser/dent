@@ -790,10 +790,9 @@ module Parser = struct
              Location.combine s e, Ast.RCons (i, fs))
            <|>
              (fun l ->
-               let* ps = Lexer.list_with_end l ((=) end_) (flip parse_pattern om) in
-               let@ e = Lexer.consume_with_pos l end_ (Printf.sprintf "Expected '%s' to end constructor list." (Token.show end_)) in
-              let loc = Location.combine s e in
-              List.fold_left (fun ap n -> loc, Ast.Ap (0, ap, n)) (loc, Ast.Var (Udc i)) ps)
+               let@ ps = Lexer.list_with_end l ((=) end_) (flip parse_pattern om) in
+                let loc = Location.combine s (Lexer.current_pos l) in
+                List.fold_left (fun ap n -> loc, Ast.Ap (0, ap, n)) (loc, Ast.Var (Udc i)) ps)
            <|>
              (fun _ -> ok (s, Ast.Var (Udc i)))) l
       | s, INT n ->  ok (s, Ast.Const (Int n))

@@ -24,7 +24,7 @@ let fmt_info msg = Format.asprintf "\x1b[1;94m@[<v>[INFO]\x1b[0m:@,%s@]" msg
 let fmt_warn loc msg =
   match loc with
   | Some l ->
-    Format.asprintf "\x1b[1;33m@[<v>[WARN]\x1b[0m %a:@,%s@]"
+    Format.asprintf "\x1b[1;33m@[<v>[WARNING]\x1b[0m %a:@,%s@]"
       Location.pp_location l msg
   | None -> Format.asprintf "\x1b[1;33m@[<v>[WARN]\x1b[0m:@,%s@]" msg
 
