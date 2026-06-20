@@ -743,7 +743,7 @@ module Parser = struct
     Lexer.list_with_end l
       (function
         | WILDCARD
-        | IMPOSSIBLE
+        | DOT
         | LBRACK
         | LPAREN
         | IDENT _
@@ -770,7 +770,7 @@ module Parser = struct
     let* p =
       match Lexer.advance l with
       | s, WILDCARD -> ok (s, Ast.Hole)
-      | s, IMPOSSIBLE -> ok (s, Ast.Impossible)
+      | s, DOT -> ok (s, Ast.Impossible)
       | s, IDENT i ->
         ( (fun l ->
             let* i = parse_lower_ident l in
@@ -852,7 +852,10 @@ module Parser = struct
   let rec parse_definition (l : Lexer.t) (om : operator_map) :
       Ast.located_definition Lexer.result =
     match Lexer.current l with
-    | _, DEC -> parse_dec l om
+    | _, INLINE ->
+       Lexer.skip l ~am:1;
+       parse_dec l true om
+    | _, DEC -> parse_dec l false om
     | _, DEF -> parse_def l om
     | pos, tok ->
       Lexer.make_err
@@ -905,13 +908,13 @@ module Parser = struct
     in
     (Location.combine s e, Ast.Def (n, args, when_block, body, with_block))
 
-  and parse_dec (l : Lexer.t) (om : operator_map) :
+  and parse_dec (l : Lexer.t) (inline : bool) (om : operator_map) :
       Ast.located_definition Lexer.result =
     let* s = Lexer.consume_with_pos l DEC "Expected 'dec' keyword." in
     let* n = parse_definition_ident l in
     let* _ = Lexer.consume l COLON "Expected ':' after 'dec' keyword." in
     let@ ((e, _) as t) = parse_expr l 0 om in
-    (Location.combine s e, Ast.Dec (n, t))
+    (Location.combine s e, Ast.Dec (inline, n, t))
 
   and parse_definition_ident (l : Lexer.t) : string Lexer.result =
     match Lexer.advance l with
@@ -1072,18 +1075,15 @@ module Parser = struct
 
   let parse_toplvl (l : Lexer.t) (om : operator_map) : Ast.top_lvl Lexer.result
       =
-    ( ( ( (fun l ->
+    ( (fun l ->
             let@ i = parse_import l in
             Ast.TImport i)
-        <|> fun l ->
+        <|> (fun l ->
           let@ t = parse_tydecl l om in
-          Ast.TTyDecl t )
+          Ast.TTyDecl t)
       <|> fun l ->
-        let@ d = parse_dec l om in
+        let@ d = parse_definition l om in
         Ast.TDef d )
-    <|> fun l ->
-      let@ d = parse_def l om in
-      Ast.TDef d )
       l
 
   let parse_program (l : Lexer.t) : Ast.program Lexer.result =

@@ -7,9 +7,8 @@
 - [x] Properly desugar record constructors.
 - [ ] Consider pattern synonyms? like in haskell.
 - [x] Add type annotations - `10 ~ Nat`.
-- [ ] Add as patterns - either `x@y` or `y as x`, where y is some pattern.
-- [ ] Add an `inline` keyword to inline a function definition.
-  - [ ] This would be best to implement alongside modules (because of the `export`/`public` stuff).
+- [x] Add as patterns - either `x@y` or `y as x`, where y is some pattern.
+- [x] Add an `inline` keyword to inline a function definition.
 - [ ] Consider adding namespaces within files with a `namespace` and `end` keyword.
 
 ## Diagnostics
@@ -21,7 +20,7 @@
 - [x] Migrate from use of exceptions to a custom error type.
 - [x] Parse and desugar new type declaration structures.
 - [ ] Parse typeclasses.
-  - See examples/tclass.dent for ideas.
+  - See examples/tclass.dent for syntax ideas.
 - [ ] Consider adding error recovery, maybe in the form of token insertion (what token you'd expect to be there)?
   - [ ] Remove usage of `Base.Or_error` alongside this change, swap to accumulating errors and then reporting them all at once.
 
@@ -35,7 +34,7 @@
     - [x] Properly turn function definitons into case trees.
   - [x] Properly typecheck record update syntax.
     - [x] Decide on whether the language uses haskell field access (`y x`) or typical field access (`x.y`).
-    - [ ] Add record patterns and desugar them to `PCtor` (have a `located_pattern` for the ast and core syntax).
+    - [x] Add record patterns and desugar them to `PCtor` (have a `located_pattern` for the ast and core syntax).
     - [ ] Generate record access functions.
   - [x] Make sure that aliases, unions and records actually work.
   - [x] Add a pass over functions/expressions to ensure that there aren't any typed holes.

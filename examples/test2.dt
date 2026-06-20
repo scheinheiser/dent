@@ -14,11 +14,13 @@ record MyRec =
   constructor Rec
   | x : Int
   | y : Int
+*)
 
 data Nat : U =
   | Z : Nat
   | S : Nat → Nat
 
+(*
 dec chooseType : Wrapper → U
 def chooseType (Left True) := String
 def chooseType (Left False) := Int
@@ -31,11 +33,23 @@ def testMatch "0" := 10
 def testMatch "1" := 20
 def testMatch _ := 30
 
-
 (*
-dec plus : Nat → Nat → Nat
-def plus Z m := m
-def plus (S n) m := S (plus n m)
+dec ( - ) : Int → Int → Int
+
+dec make : Int → Nat
+def make 0 := Z
+def make n := S (make (n - 1))
+
+dec max : Nat → Nat → Nat
+def max Z j := j
+def max i Z := i
+def max (S k) (S l) := S (max k l)
+
+dec something : Nat
+def something :=
+  let l := make 10 in
+  let r := make 20 in
+  max l r
 
 dec v : chooseType true
 def v := "hello"

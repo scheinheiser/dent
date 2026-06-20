@@ -20,7 +20,6 @@ and token =
   | UPPER_IDENT of string
   | DOT_SEP_IDENT of string * string list
   | OP of string
-  | IMPOSSIBLE
   | WHEN
   | WHERE
   | WITH
@@ -40,6 +39,7 @@ and token =
   | IN
   | END
   | MODULE
+  | INLINE
   | IMPORT
   | ALIAS
   | DATA

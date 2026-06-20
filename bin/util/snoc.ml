@@ -63,6 +63,8 @@ let of_list l =
   in
   go l Lin
 
+let of_rev_list l = List.rev l |> of_list
+
 let to_list s =
   let rec go s acc =
     match s with

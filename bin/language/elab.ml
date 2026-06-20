@@ -336,8 +336,7 @@ let rec quote (lvl : lvl) (v : val_) : tm =
                 (sn, l + 1))
               (env, l) args
           in
-          (args, l + Snoc.length args)
-        (* adding arg length is kinda sus *)
+          (args, l)
       in
       let env, l = build_env env p lvl in
       let wb = eval env wb |> quote l in
@@ -527,13 +526,13 @@ and top_entry = {
 }
 
 and def =
-  | Def of tm
+  | Def of (bool * tm)
   | RCon of string * (string * tm) list
   | DCon of (string * tm)
     (* type constructor name, the function that constructs the value. *)
   | TCon of string list (* a list of all of the data constructors *)
   | Alias of tm
-  | Axiom
+  | Axiom of bool
 
 let empty_ctx () =
   {
@@ -545,10 +544,10 @@ let empty_ctx () =
     bds = Snoc.empty;
   }
 
+(* helper functions for operations on ctx *)
 let flush_locals ctx =
   {ctx with env = Snoc.empty; tys = Snoc.empty; lvl = 0; bds = Snoc.empty}
 
-(* helper functions for operations on ctx *)
 let update_loc (loc : Location.t) (ctx : ctx) = {ctx with loc}
 
 let bind_var ~(id : string) ~(t : val_) (ctx : ctx) =
@@ -569,10 +568,10 @@ let define_var ~(id : string) ~(v : val_) ~(t : val_) (ctx : ctx) =
     bds = ctx.bds @> D;
   }
 
-let bind_func ~(id : string) ~(t : val_) (ctx : ctx) =
-  {ctx with top = SM.add id {ty = t; def = Axiom} ctx.top}
+let bind_func ~(id : string) ~(t : val_) ~(inline: bool) (ctx : ctx) =
+  {ctx with top = SM.add id {ty = t; def = Axiom inline} ctx.top}
 
-let define_func ~(id : string) ~(v : tm) ~(t : val_) (ctx : ctx) =
+let define_func ~(id : string) ~(v : bool * tm) ~(t : val_) (ctx : ctx) =
   {ctx with top = SM.add id {ty = t; def = Def v} ctx.top}
 
 let define_dcon ~(id : string) ~(t : val_) ~(v : string * tm) (ctx : ctx) =
@@ -619,7 +618,10 @@ let lookup_rcon (i : string) (ctx : ctx) :
   match lookup_top i ctx with
   | Some (RCon (con, r), ty) -> Some (con, r, ty)
   | _ ->
-    err (Some ctx.loc, Printf.sprintf "Undefined record constructor - '%s'." i)
+     err (Some ctx.loc, Printf.sprintf "Undefined record constructor - '%s'." i)
+
+(* compute the normal form of a term *)
+let nf ctx v = eval ctx.env v |> quote ctx.lvl
 
 let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
   let bump_lvl ctx = {ctx with lvl = ctx.lvl + 1} in
@@ -678,12 +680,12 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
   | VTop (i, sp), t | t, VTop (i, sp) -> (
     match lookup_top i ctx with
     | None -> err (Some ctx.loc, Printf.sprintf "Undefined identifier - '%s'." i)
-    | Some (Def b, _) | Some (Alias b, _) ->
+    | Some (Def (_, b), _) | Some (Alias b, _) ->
       let b = eval Snoc.empty b |> v_ap_sp sp in
       unify ctx b t
     | Some (DCon _, t') | Some (TCon _, t') -> unify ctx t' t
     | Some (RCon _, _) -> Error.todo ""
-    | Some (Axiom, _) ->
+    | Some (Axiom _, _) ->
       err (Some ctx.loc, Printf.sprintf "The function '%s' has no definition." i)
     )
   | VMeta (mv, sp), VMeta (mv', sp') when mv = mv' -> unify_sp ctx sp sp'
@@ -913,6 +915,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     match lookup_top i ctx with
     | Some (DCon (_, b), t) -> some (b, t)
     | Some (Alias base, t) -> some (base, t)
+    | Some (Def (true, b), t) -> some (b, t)
     | Some (_, t) -> some (Top i, t)
     | None ->
       let@ n, t = lookup_local i ctx in
@@ -1089,7 +1092,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     | Snoc (_, ((_, (_, PCtor _), _) as c))
     | Snoc (_, ((_, (_, PConst _), _) as c)) -> Some c
     | Snoc (cs, _) -> find_split cs
-    (*TODO: split on literals, types (?) *)
   in
   let rec done_ ctx target constrs wb body =
     let open Snoc in
@@ -1129,8 +1131,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
       check ctx body target
     | Snoc (cs, (_, (_, PWild), _)) -> done_ ctx target cs wb body
     | Snoc (cs, (new_, (_, PVar prev), _)) ->
-      (* rename any occurences of the pattern var with the constr var *)
-      Log.dbg None (Printf.sprintf "renamed %s to %s.\n" prev new_);
+       (* rename any occurences of the pattern var with the constr var *)
       let rename = rename_expr prev new_ in
       done_ ctx target cs (rename wb) (rename body)
     | _ -> Error.internal "splittable constraint in done_."
@@ -1263,8 +1264,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
           Local (sc, n)
         in
         let@ hit =
-          let rec build_cases (ctx, c_acc) = function
-            | [] -> some (ctx, c_acc)
+          let rec build_cases c_acc = function
+            | [] -> some c_acc
             | d :: cs ->
               (* builds a case tree for a given constructor *)
               let* _, t = lookup_con loc d ctx in
@@ -1281,8 +1282,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               let args =
                 Snoc.map (fun (p, _) -> (loc, PVar p)) pts |> Snoc.to_list
               in
-              let b = ((loc, PCtor (d, args)), Const (Bool true), t) in
-              build_cases (ctx, b :: c_acc) cs
+              let b = ((loc, PCtor (d, args)), Const (Bool true), nf ctx t) in
+              build_cases (b :: c_acc) cs
           in
           let build_default_case ctx missed =
             (* builds a fallback case for any missing constructors. *)
@@ -1313,18 +1314,16 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                 build_tree ctx
                   {clauses = List.rev clauses; target = prob.target}
               in
-              ((loc, PWild), Const (Bool true), tree)
+              ((loc, PWild), Const (Bool true), nf ctx tree)
           in
-          let* ctx, bcs = build_cases (ctx, []) hit in
+          let* bcs = build_cases [] hit in
           match missed with
           | [] -> some bcs
           | _ ->
             let@ def = build_default_case ctx missed in
             bcs @ [def]
         in
-        let t = Match (sctm, hit) in
-        (* kinda hacky to get β reduction on lambdas *)
-        eval ctx.env t |> quote ctx.lvl
+        Match (sctm, hit)
       | PConst c ->
         let equal_const l r =
           match (l, r) with
@@ -1404,10 +1403,11 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                 |> combine_errors
               in
               let* t = build_tree ctx {clauses; target = prob.target} in
-              let c = ((loc, PConst const), Const (Bool true), t) in
+              let c = ((loc, PConst const), Const (Bool true), nf ctx t) in
               build_cases (c :: c_acc) cs
           in
           let build_default_case ctx =
+            (* create a default, missed value based on the type of constant given. *)
             let get_default cs =
               let fail () = Error.internal "failed to remove unequal consts." in
               match c with
@@ -1475,13 +1475,14 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                 build_tree ctx
                   {clauses = List.rev clauses; target = prob.target}
               in
-              ((loc, PWild), Const (Bool true), tree)
+              ((loc, PWild), Const (Bool true), nf ctx tree)
           in
           let* bcs = build_cases [] hit in
           let@ def = build_default_case ctx in
           bcs @ [def]
         in
         let t = Match (sctm, cases) in
+        (* attempt to reduce any lambda/inlined function application *)
         eval ctx.env t |> quote ctx.lvl
       | _ -> Error.internal "unsplittable pattern from find_split."))
   | _ -> Error.todo "bing"
@@ -1489,10 +1490,12 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
 let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
     (located_definition list * ctx) result =
   let* locals, ctx' = check_locals ctx locals in
-  let clause = (Snoc.empty, Snoc.of_list args, unoption_wb loc wb, b) in
-  let* target = get_target i ctx' in
+  let clause = (Snoc.empty, Snoc.of_rev_list args, unoption_wb loc wb, b) in
+  let* inline, target = get_target i ctx' in
   let@ b = build_tree ctx' {clauses = [clause]; target} in
-  let d = (loc, (quote ctx'.lvl @@ force target, i, b)) in
+  let t = force target in
+  let d = (loc, (quote ctx'.lvl t, i, b)) in
+  let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
   (d :: locals, ctx)
 
 and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
@@ -1518,7 +1521,7 @@ and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
       let ms =
         List.map
           (fun (_, (_, args, wb, ((loc, _) as b), _)) ->
-            (Snoc.empty, Snoc.of_list args, unoption_wb loc wb, b))
+            (Snoc.empty, Snoc.of_rev_list args, unoption_wb loc wb, b))
           ms'
       in
       let* locals, ctx' = check_locals ctx locals in
@@ -1531,10 +1534,12 @@ and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
         in
         go [] ctx' @@ List.map (fun (_, (_, _, _, _, locals)) -> locals) ms'
       in
-      let def = (Snoc.empty, Snoc.of_list args, unoption_wb loc wb, b) in
-      let* target = get_target i ctx' in
+      let def = (Snoc.empty, Snoc.of_rev_list args, unoption_wb loc wb, b) in
+      let* inline, target = get_target i ctx' in
       let@ b = build_tree ctx' {clauses = def :: ms; target} in
-      let b = (loc, (quote ctx'.lvl @@ force target, i, b)) in
+      let t = force target in
+      let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
+      let b = (loc, (quote ctx'.lvl t, i, b)) in
       ((b :: locals) @ locals', ctx)
   in
   (ds, ctx, List.rev remaining)
@@ -1547,16 +1552,16 @@ and check_locals ctx locals =
       let@ ds =
         List.filter_map
           (function
-            | _, Ast.Dec (i, sig_) -> Some (i, sig_)
+            | _, Ast.Dec (inline, i, sig_) -> Some (inline, i, sig_)
             | _ -> None)
           locals
-        |> List.map (fun (i, sig_) ->
+        |> List.map (fun (inline, i, sig_) ->
             let@ sig_, _ = is_type ctx sig_ in
-            (i, sig_))
+            (inline, i, sig_))
         |> combine_errors
       in
       List.fold_left
-        (fun ctx (i, sig_) -> bind_func ~id:i ~t:(eval ctx.env sig_) ctx)
+        (fun ctx (inline, i, sig_) -> bind_func ~id:i ~t:(eval ctx.env sig_) ~inline ctx)
         ctx ds
     in
     let rec go ctx acc = function
@@ -1585,8 +1590,8 @@ and check_locals ctx locals =
 
 and get_target i ctx =
   match lookup_top i ctx with
-  | None -> Some (eval Snoc.empty @@ gen_mv ctx.bds)
-  | Some (Axiom, t') -> Some t'
+  | None -> Some (false, eval Snoc.empty @@ gen_mv ctx.bds)
+  | Some (Axiom inline, t') -> Some (inline, t')
   | Some (Def _, _) ->
     err
       ( Some ctx.loc,
@@ -1713,16 +1718,16 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
   let* ctx =
     let rec go ctx = function
       | [] -> Some ctx
-      | (i, t) :: ts ->
+      | (inline, i, t) :: ts ->
         let* t, _ = is_type ctx t in
         let t = eval Snoc.empty t in
         Log.dbg None (Format.asprintf "%s ↦ %a@." i pp_val t);
-        go (bind_func ~id:i ~t ctx) ts
+        go (bind_func ~id:i ~t ~inline ctx) ts
     in
     let decs =
       List.filter_map
         (function
-          | _, Ast.Dec (i, t) -> Some (i, t)
+          | _, Ast.Dec (inline, i, t) -> Some (inline, i, t)
           | _ -> None)
         defs
     in

@@ -15,6 +15,7 @@ val ( <@ ) : 'a t -> 'a t -> 'a t
 val flatten : 'a t t -> 'a t
 val reverse : 'a t -> 'a t
 val of_list : 'a list -> 'a t
+val of_rev_list : 'a list -> 'a t
 val to_list : 'a t -> 'a list
 
 (* snoc list transformations *)

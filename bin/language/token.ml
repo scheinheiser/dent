@@ -20,7 +20,6 @@ and token =
   | UPPER_IDENT of string
   | DOT_SEP_IDENT of string * string list
   | OP of string
-  | IMPOSSIBLE
   | WHEN
   | WHERE
   | WITH
@@ -40,6 +39,7 @@ and token =
   | IN
   | END
   | MODULE
+  | INLINE
   | IMPORT
   | ALIAS
   | DATA
@@ -91,7 +91,6 @@ let show (t : token) : string =
   | DOT_SEP_IDENT (i, is) ->
     sprintf "DOT_SEP_IDENT %s.%s" i (String.concat "." is)
   | OP o -> sprintf "OP %s" o
-  | IMPOSSIBLE -> "IMPOSSIBLE"
   | WHEN -> "WHEN"
   | WHERE -> "WHERE"
   | WITH -> "WITH"
@@ -111,6 +110,7 @@ let show (t : token) : string =
   | IN -> "IN"
   | END -> "END"
   | MODULE -> "MODULE"
+  | INLINE -> "INLINE"
   | IMPORT -> "IMPORT"
   | ALIAS -> "ALIAS"
   | DATA -> "DATA"

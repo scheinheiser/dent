@@ -51,7 +51,7 @@ and tdecl_type =
 type located_definition = Location.t * definition
 
 and definition =
-  | Dec of string * located_expr
+  | Dec of bool * string * located_expr
   | Def of
       string
       * located_expr list
@@ -158,7 +158,11 @@ let pp_when_block out (when_block : located_expr option) =
 
 let rec pp_definition out ((_, def) : located_definition) =
   match def with
-  | Dec (f, ts) -> Format.fprintf out "(dec %s @[<hov>%a@])" f pp_expr ts
+  | Dec (inline, f, ts) ->
+     let d = Format.asprintf "dec %s @[<hov>%a@]" f pp_expr ts in
+     if inline
+     then Format.fprintf out "(inline %s)" d
+     else Format.fprintf out "(%s)" d
   | Def (f, args, when_block, body, with_block) ->
     Format.fprintf out "(de@[<v>f %s (%a)@,%a@,%a@,%a@])" f
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_expr)

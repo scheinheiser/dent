@@ -28,6 +28,7 @@ let keywords =
     ("rassoc", RASSOC);
     ("lassoc", LASSOC);
     ("module", MODULE);
+    ("inline", INLINE);
     ("import", IMPORT);
     ("Int", TY_INT);
     ("Float", TY_FLOAT);
@@ -70,7 +71,6 @@ let builtin_symbol =
     ("=@", RECORD_FUN);
     ("|", PIPE);
     ("~", TILDE);
-    ("!", IMPOSSIBLE);
     (".", DOT);
   ]
 

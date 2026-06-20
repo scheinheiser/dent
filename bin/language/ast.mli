@@ -49,7 +49,7 @@ and tdecl_type =
 type located_definition = Location.t * definition
 
 and definition =
-  | Dec of string * located_expr
+  | Dec of bool * string * located_expr
   | Def of
       string
       * located_expr list

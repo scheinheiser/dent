@@ -6,7 +6,7 @@ let border () =
   print_newline ()
 
 let () =
-  let input = In_channel.(open_text "examples/test2.dent" |> input_all) in
+  let input = In_channel.(open_text "examples/test2.dt" |> input_all) in
   let l = Lexer.of_string input in
   let res = Parser.parse_program l in
   match res with
