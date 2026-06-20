@@ -1,5 +1,6 @@
 open! Language
-open! Parser
+open! Parse.Parser
+open! Check
 
 let border () =
   Seq.init 30 (fun _ -> '-') |> String.of_seq |> print_endline;
@@ -13,8 +14,8 @@ let () =
   | Ok res -> (
     Ast.pp_program Format.std_formatter res;
     border ();
-    let res = Elab.check_program res in
+    let res = Check.Elab.check_program res in
     match res with
     | None -> ()
-    | Some res -> Elab.pp_program Format.std_formatter res)
+    | Some res -> Check.Core.pp_program Format.std_formatter res)
   | Error e -> Base.Error.pp Format.std_formatter e

@@ -3,3 +3,5 @@
  (libraries util base sedlex)
  (preprocess
   (pps sedlex.ppx)))
+
+(include_subdirs qualified)
