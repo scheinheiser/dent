@@ -4,6 +4,7 @@ open Primitive
 open Core
 open Context
 open Evaluation
+open Parse
 
 let flip = Fun.flip
 let id = Fun.id
@@ -42,7 +43,7 @@ let rec quote (lvl : lvl) (v : val_) : tm =
   | VTuple (l, r) -> Tuple (quote lvl l, quote lvl r)
   | VMatch (c, env, bs) ->
     let c = quote lvl c in
-    let quote_b env (p, wb, b) =
+    let quote_b env (p, b) =
       let rec build_env env (_, p) l =
         match p with
         | PWild | PTypeLit _ | PConst _ | PAbs -> (env, l)
@@ -64,9 +65,8 @@ let rec quote (lvl : lvl) (v : val_) : tm =
           (args, l)
       in
       let env, l = build_env env p lvl in
-      let wb = eval env wb |> quote l in
       let b = eval env b |> quote l in
-      (p, wb, b)
+      (p, b)
     in
     let bs = List.map (quote_b env) bs in
     Match (c, bs)
@@ -93,8 +93,8 @@ and quote_sp (lvl : lvl) (v : tm) (sp : spine) : tm =
 type constr = string * located_pattern * val_ (* m /? pat, ty *)
 
 and clause =
-  constr Snoc.t * located_pattern Snoc.t * Ast.located_expr * Ast.located_expr
-(* pattern constraints, remaining patterns, when-block and body *)
+  constr Snoc.t * located_pattern Snoc.t * Ast.located_expr
+(* pattern constraints, remaining patterns and body *)
 
 and problem = {
   clauses : clause list;
@@ -200,10 +200,9 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
       let* c = go p c in
       let@ bs =
         List.map
-          (fun (pat, wb, b) ->
-            let* wb = eval env wb |> go p in
+          (fun (pat, b) ->
             let@ b = eval env b |> go p in
-            (pat, wb, b))
+            (pat, b))
           bs
         |> combine_errors
       in
@@ -281,7 +280,7 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
     (*TODO: unify patterns *)
     let* _ = unify ctx c c' in
     List.map2
-      (fun (p, _, b) (p', _, b') ->
+      (fun (p, b) (p', b') ->
         let b = eval env b in
         let b' = eval env' b' in
         let* _ = unify_pat ctx p p' in
@@ -423,8 +422,8 @@ let replace_pattern ((_, p) : Ast.located_expr)
     (* we create a match expr to remove the pattern from the expression *)
     let i = fresh_pattern_var () in
     let match_ =
-      let c = (loc, Ast.Var (Ident i)) in
-      let branch = [((loc, p), None, b)] in
+     let c = (loc, Ast.Var (Ident i)) in
+      let branch = [((loc, p), b)] in
       (loc, Ast.Match (c, branch))
     in
     (i, match_)
@@ -440,8 +439,8 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     in
     Lam (i, b)
   | Ast.If (c, t, f), t' ->
-    let t = ((loc, Ast.Const (Bool true)), None, t) in
-    let f = ((loc, Ast.Const (Bool false)), None, f) in
+    let t = ((loc, Ast.Const (Bool true)), t) in
+    let f = ((loc, Ast.Const (Bool false)), f) in
     let e = (loc, Ast.Match (c, [t; f])) in
     check ctx e t'
   | Ast.Let (p, t, b, n), t' -> (
@@ -463,14 +462,9 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     let c_id = fresh_scrut_var () in
     let* cs =
       List.map
-        (fun (p, wb, ((loc, _) as b)) ->
-          let wb =
-            match wb with
-            | None -> (loc, Ast.Const (Bool true))
-            | Some wb -> wb
-          in
+        (fun (p, b) ->
           let@ p = to_pattern ctx p in
-          (singleton (c_id, p, t), Snoc.empty, wb, b))
+          (singleton (c_id, p, t), Snoc.empty, b))
         bs
       |> combine_errors
     in
@@ -708,7 +702,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     | Snoc (_, ((_, (_, PConst _), _) as c)) -> Some c
     | Snoc (cs, _) -> find_split cs
   in
-  let rec done_ ctx target constrs wb body =
+  let rec done_ ctx target constrs body =
     let open Snoc in
     let rec rename_expr prev new_ (loc, e) =
       let rename = rename_expr prev new_ in
@@ -724,7 +718,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
       | Ast.Match (sc, bs) ->
         let bs =
           List.map
-            (fun (p, wb, b) -> (p, Base.Option.map ~f:rename wb, rename b))
+            (fun (p, b) -> (p, rename b))
             bs
         in
         (loc, Ast.Match (rename sc, bs))
@@ -741,36 +735,34 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
       | _ -> (loc, e)
     in
     match constrs with
-    | Lin ->
-      (*TODO: figure out what to do with the wb *)
-      check ctx body target
-    | Snoc (cs, (_, (_, PWild), _)) -> done_ ctx target cs wb body
+    | Lin -> check ctx body target
+    | Snoc (cs, (_, (_, PWild), _)) -> done_ ctx target cs body
     | Snoc (cs, (new_, (_, PVar prev), _)) ->
        (* rename any occurences of the pattern var with the constr var *)
       let rename = rename_expr prev new_ in
-      done_ ctx target cs (rename wb) (rename body)
+      done_ ctx target cs (rename body)
     | _ -> Error.internal "splittable constraint in done_."
   in
   match (prob.clauses, prob.target) with
   | [], _ -> Error.internal "no cases in build_tree."
-  | (_, Snoc.Snoc (_, _), _, _) :: _, VPi (_, l, cl) ->
+  | (_, Snoc.Snoc (_, _), _) :: _, VPi (_, l, cl) ->
     let n = fresh_scrut_var () in
     let r = cl $$ VLocal (n, ctx.lvl, Snoc.empty) in
     let ctx = bind_var ~id:n ~t:l ctx in
     let* clauses =
       List.map
-        (fun (constrs, pats, wb, b) ->
+        (fun (constrs, pats, b) ->
           match pats with
           | Snoc.Lin -> err (Some ctx.loc, "Clause size doesn't match.")
-          | Snoc.Snoc (ps, p) -> Some (constrs @> (n, p, l), ps, wb, b))
+          | Snoc.Snoc (ps, p) -> Some (constrs @> (n, p, l), ps, b))
         prob.clauses
       |> combine_errors
     in
     let@ b = build_tree ctx {clauses; target = r} in
     Lam (n, b)
-  | (constrs, Snoc.Lin, c_wb, c_body) :: _, target -> (
+  | (constrs, Snoc.Lin, c_body) :: _, target -> (
     match find_split constrs with
-    | None -> done_ ctx target constrs c_wb c_body
+    | None -> done_ ctx target constrs c_body
     | Some (sc, (loc, p), _) -> (
       let ctx = update_loc loc ctx in
       match p with
@@ -780,7 +772,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
           let rec go cs nm acc =
             match cs with
             | [] -> acc
-            | (constrs, _, _, _) :: cs -> (
+            | (constrs, _, _) :: cs -> (
               match Snoc.find_opt (fun (n, _, _) -> n = nm) constrs with
               | None -> go cs nm acc
               | Some (_, (_, PCtor (c, _)), _) -> go cs nm (c :: acc)
@@ -887,9 +879,9 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               let* ctx, pts = push_names ctx t in
               let* clauses =
                 List.filter_map
-                  (fun (c, ps, wb, b) ->
+                  (fun (c, ps, b) ->
                     let@ c = rewrite_constr ctx pts c d in
-                    Some (c, ps, wb, b))
+                    Some (c, ps, b))
                   prob.clauses
                 |> combine_errors
               in
@@ -897,14 +889,14 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               let args =
                 Snoc.map (fun (p, _) -> (loc, PVar p)) pts |> Snoc.to_list
               in
-              let b = ((loc, PCtor (d, args)), Const (Bool true), nf ctx t) in
+              let b = ((loc, PCtor (d, args)), nf ctx t) in
               build_cases (b :: c_acc) cs
           in
           let build_default_case ctx missed =
             (* builds a fallback case for any missing constructors. *)
             let clauses =
               List.filter
-                (fun (constrs, _, _, _) ->
+                (fun (constrs, _, _) ->
                   match Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs with
                   | Some (_, (_, PWild), _) -> true
                   | Some (_, (_, PVar _), _) -> true
@@ -923,13 +915,13 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                     (String.concat ", " missed) );
               let hole = gen_mv ctx.bds in
               add_hole (loc, (eval Snoc.empty hole, prob.target));
-              some ((loc, PWild), Const (Bool true), hole)
+              some ((loc, PWild), hole)
             | _ ->
               let@ tree =
                 build_tree ctx
                   {clauses = List.rev clauses; target = prob.target}
               in
-              ((loc, PWild), Const (Bool true), nf ctx tree)
+              ((loc, PWild), nf ctx tree)
           in
           let* bcs = build_cases [] hit in
           match missed with
@@ -954,7 +946,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
           let rec go cs nm acc =
             match cs with
             | [] -> acc
-            | (constrs, _, _, _) :: cs -> (
+            | (constrs, _, _) :: cs -> (
               match Snoc.find_opt (fun (n, _, _) -> n = nm) constrs with
               | None -> go cs nm acc
               | Some (_, (_, PConst c), _) -> go cs nm (c :: acc)
@@ -1011,14 +1003,14 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             | const :: cs ->
               let* clauses =
                 List.filter_map
-                  (fun (constr, ps, wb, b) ->
+                  (fun (constr, ps, b) ->
                     let@ constr = rewrite_constr ctx constr const in
-                    Some (constr, ps, wb, b))
+                    Some (constr, ps, b))
                   prob.clauses
                 |> combine_errors
               in
               let* t = build_tree ctx {clauses; target = prob.target} in
-              let c = ((loc, PConst const), Const (Bool true), nf ctx t) in
+              let c = ((loc, PConst const), nf ctx t) in
               build_cases (c :: c_acc) cs
           in
           let build_default_case ctx =
@@ -1071,7 +1063,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             in
             let clauses =
               List.filter
-                (fun (constrs, _, _, _) ->
+                (fun (constrs, _, _) ->
                   match Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs with
                   | Some (_, (_, PWild), _) | Some (_, (_, PVar _), _) -> true
                   | _ -> false)
@@ -1090,22 +1082,20 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                 build_tree ctx
                   {clauses = List.rev clauses; target = prob.target}
               in
-              ((loc, PWild), Const (Bool true), nf ctx tree)
+              ((loc, PWild), nf ctx tree)
           in
           let* bcs = build_cases [] hit in
           let@ def = build_default_case ctx in
           bcs @ [def]
         in
-        let t = Match (sctm, cases) in
-        (* attempt to reduce any lambda/inlined function application *)
-        eval ctx.env t |> quote ctx.lvl
+        Match (sctm, cases)
       | _ -> Error.internal "unsplittable pattern from find_split."))
   | _ -> Error.todo "bing"
 
-let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
+let rec check_definition (ctx : ctx) (loc, (i, args, b, locals)) :
     (located_definition list * ctx) result =
   let* locals, ctx' = check_locals ctx locals in
-  let clause = (Snoc.empty, Snoc.of_rev_list args, unoption_wb loc wb, b) in
+  let clause = (Snoc.empty, Snoc.of_rev_list args, b) in
   let* inline, target = get_target i ctx' in
   let@ b = build_tree ctx' {clauses = [clause]; target} in
   let t = force target in
@@ -1113,11 +1103,11 @@ let rec check_definition (ctx : ctx) (loc, (i, args, wb, b, locals)) :
   let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
   (d :: locals, ctx)
 
-and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
+and check_flpm ctx ((loc, (i, args, b, locals)) as def) ds =
   let* remaining, matched =
     let rec go failed_acc acc = function
       | [] -> Some (failed_acc, acc)
-      | ((_, (i', args', _, _, _)) as d) :: ds
+      | ((_, (i', args', _, _)) as d) :: ds
         when i' = i && List.length args = List.length args' ->
         let* r = List.map2 (equal_pat ctx) args args' |> combine_errors in
         if List.for_all id r then
@@ -1135,8 +1125,8 @@ and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
       let ms' = List.rev ms' in
       let ms =
         List.map
-          (fun (_, (_, args, wb, ((loc, _) as b), _)) ->
-            (Snoc.empty, Snoc.of_rev_list args, unoption_wb loc wb, b))
+          (fun (_, (_, args, b, _)) ->
+            (Snoc.empty, Snoc.of_rev_list args, b))
           ms'
       in
       let* locals, ctx' = check_locals ctx locals in
@@ -1147,9 +1137,9 @@ and check_flpm ctx ((loc, (i, args, wb, b, locals)) as def) ds =
             let* l, ctx = check_locals ctx l in
             go (l :: acc) ctx ls
         in
-        go [] ctx' @@ List.map (fun (_, (_, _, _, _, locals)) -> locals) ms'
+        go [] ctx' @@ List.map (fun (_, (_, _, _, locals)) -> locals) ms'
       in
-      let def = (Snoc.empty, Snoc.of_rev_list args, unoption_wb loc wb, b) in
+      let def = (Snoc.empty, Snoc.of_rev_list args, b) in
       let* inline, target = get_target i ctx' in
       let@ b = build_tree ctx' {clauses = def :: ms; target} in
       let t = force target in
@@ -1181,12 +1171,12 @@ and check_locals ctx locals =
     in
     let rec go ctx acc = function
       | [] -> (List.rev acc, ctx)
-      | (loc, (i, args, wb, b, locals)) :: ds -> (
+      | (loc, (i, args, b, locals)) :: ds -> (
         let args = List.map (to_pattern ctx) args |> combine_errors in
         match args with
         | None -> go ctx (None :: acc) ds
         | Some args -> (
-          let d = (loc, (i, args, wb, b, locals)) in
+          let d = (loc, (i, args, b, locals)) in
           match check_definition ctx d with
           | Some (d, ctx) -> go ctx (Some d :: acc) ds
           | None -> go ctx (None :: acc) ds))
@@ -1194,8 +1184,8 @@ and check_locals ctx locals =
     let r, ctx =
       List.filter_map
         (function
-          | loc, Ast.Def (i, args, wb, b, locals) ->
-            Some (loc, (i, args, wb, b, locals))
+          | loc, Ast.Def (i, args, b, locals) ->
+            Some (loc, (i, args, b, locals))
           | _ -> None)
         locals
       |> go ctx []
@@ -1214,10 +1204,6 @@ and get_target i ctx =
   | Some _ ->
     (* shouldn't occur unless it's an operator. *)
     err (Some ctx.loc, Printf.sprintf "The identifier '%s' is already in use." i)
-
-and unoption_wb loc = function
-  | None -> (loc, Ast.Const (Bool true))
-  | Some wb -> wb
 
 let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
   let ctx = empty_ctx () in
@@ -1352,16 +1338,16 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let defs =
       List.filter_map
         (function
-          | loc, Ast.Def (i, args, wb, b, locals) ->
-            Some (loc, (i, args, wb, b, locals))
+          | loc, Ast.Def (i, args, b, locals) ->
+            Some (loc, (i, args, b, locals))
           | _ -> None)
         defs
     in
     let* defs =
       List.map
-        (fun (loc, (i, args, wb, b, locals)) ->
+        (fun (loc, (i, args, b, locals)) ->
           let@ args = List.map (to_pattern ctx) args |> combine_errors in
-          (loc, (i, args, wb, b, locals)))
+          (loc, (i, args, b, locals)))
         defs
       |> combine_errors
     in

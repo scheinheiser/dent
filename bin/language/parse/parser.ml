@@ -666,7 +666,7 @@ module Parser = struct
 
   and parse_let (l : Lexer.t) (om : operator_map) (s : Location.t) :
       Ast.located_expr Lexer.result =
-    let* p = parse_pattern l om in
+    let* ps = parse_args l om in
     let* ty =
       match Lexer.current l with
       | _, COLON ->
@@ -685,7 +685,13 @@ module Parser = struct
             Printf.sprintf "Unexpected token in let-expression: %s"
               (Token.show tok) )
     in
-    let* expr = parse_expr l 0 om in
+    let* (loc, _) as expr = parse_expr l 0 om in
+    let p, expr =
+      (* let id A t := t in ... ===> let id := λ A. λ t. t in ... *)
+      let id, args = List.hd ps, List.tl ps in
+      let expr = List.fold_right (fun arg b -> loc, Ast.Lam (arg, b)) args expr in
+      id, expr
+    in
     let* e =
       Lexer.consume_with_pos l IN "Expected 'in' to end let-expression."
     in
@@ -720,19 +726,11 @@ module Parser = struct
     let* _ = Lexer.consume l TO "Expected 'to' after match subject." in
     let go l =
       let* p = parse_pattern l om in
-      let* wb =
-        match Lexer.current l with
-        | _, WHEN ->
-          Lexer.skip ~am:1 l;
-          let@ e = parse_expr l 0 om in
-          Some e
-        | _ -> ok None
-      in
       let* _ =
         Lexer.consume l F_ARROW "Expected '=>' or '⇒' after match pattern."
       in
       let@ e = parse_expr l 0 om in
-      (p, wb, e)
+      (p, e)
     in
     Lexer.consume_opt l PIPE;
     let@ branches = Lexer.separated_list l ~sep:PIPE go in
@@ -870,23 +868,8 @@ module Parser = struct
     let* s = Lexer.consume_with_pos l DEF "Expected 'def' keyword." in
     let* n = parse_definition_ident l in
     let* args = parse_args l om in
-    let* when_block =
-      match Lexer.current l with
-      | _, COLON ->
-        Lexer.skip l ~am:1;
-        let* _ = Lexer.consume l WHEN "Expected 'when' after ':' in def." in
-        let* block = parse_expr l 0 om in
-        let@ _ = Lexer.consume l EQ "Expected '=' after when block." in
-        Some block
-      | _, ASSIGNMENT ->
-        Lexer.skip l ~am:1;
-        ok None
-      | pos, tok ->
-        Lexer.make_err
-          ( Some pos,
-            Printf.sprintf
-              "Expected ':' or ':=' after definition arguments, but got '%s'."
-              (Token.show tok) )
+    let* _ =
+      Lexer.consume l ASSIGNMENT "Expected ':=' to seperate a function definition and body."
     in
     let* ((loc, _) as body) = parse_expr l 0 om in
     let@ e, with_block =
@@ -906,7 +889,7 @@ module Parser = struct
       <|> fun _ -> ok (loc, []) )
         l
     in
-    (Location.combine s e, Ast.Def (n, args, when_block, body, with_block))
+    (Location.combine s e, Ast.Def (n, args, body, with_block))
 
   and parse_dec (l : Lexer.t) (inline : bool) (om : operator_map) :
       Ast.located_definition Lexer.result =
@@ -987,7 +970,6 @@ module Parser = struct
         | _, LPAREN ->
           Lexer.skip ~am:1 l;
           let* i = parse_user_op l in
-          Log.dbg None (Printf.sprintf "user_op := %s\n" i);
           let@ _ =
             Lexer.consume l RPAREN "Expected a ')' to end operator variant."
           in

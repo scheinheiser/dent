@@ -42,7 +42,7 @@ type tm =
   | IMv of mv * bd Snoc.t (* generated mv *)
   | Tuple of tm * tm
   | Let of string * tm * tm * tm (* let p₁ ... pₙ : type = e₁ in e₂ *)
-  | Match of tm * (located_pattern * tm * tm) list
+  | Match of tm * (located_pattern * tm) list
     (* match cond to | p₁ when x₁ => y₁ ... | pₙ when xₙ => yₙ*)
   | Lam of string * tm
   | Const of const
@@ -56,7 +56,7 @@ and val_ =
   | VLocal of string * lvl * spine
   | VMeta of mv * spine
   | VTuple of val_ * val_
-  | VMatch of val_ * env * (located_pattern * tm * tm) list
+  | VMatch of val_ * env * (located_pattern * tm) list
   | VPi of string * val_ * closure
   | VTypeLit of prim
   | VConst of const
@@ -126,7 +126,7 @@ let rec pp_tm out (tm : tm) =
   | Lam (arg, body) ->
     Format.fprintf out "λ@[<v 2> %s. {@,%a@]@,}" arg pp_tm body
   | Match (c, bs) ->
-    let pp_branch out (p, _, b) =
+    let pp_branch out (p, b) =
       Format.fprintf out "@[(%a) ⇒ %a@]" pp_pattern p pp_tm b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_tm c
@@ -153,9 +153,8 @@ let rec pp_val out (v : val_) =
   | VLam (p, cl) -> Format.fprintf out "λ@[<v> %s. {@,%a@]@,}" p pp_closure cl
   | VTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_val l pp_val r
   | VMatch (c, _, bs) ->
-    let pp_branch out (p, wb, b) =
-      Format.fprintf out "(wh@[<v>en %a)@,(%a) ⇒ %a@]" pp_tm wb pp_pattern p
-        pp_tm b
+    let pp_branch out (p, b) =
+      Format.fprintf out "(%a) ⇒ %a" pp_pattern p pp_tm b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_val c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)

@@ -15,7 +15,7 @@ and expr =
       * located_expr
       * located_expr (* let p₁ ... pₙ : <optional_ty> = e₁ in e₂ *)
   | Match of
-      located_expr * (located_expr * located_expr option * located_expr) list
+      located_expr * (located_expr * located_expr) list
   | If of located_expr * located_expr * located_expr
   | Lam of located_expr * located_expr
   | Const of const
@@ -53,7 +53,6 @@ and definition =
   | Def of
       string
       * located_expr list
-      * located_expr option
       * located_expr
       * with_block
 (* identifer, args, optional when-block, body, optional with-block *)

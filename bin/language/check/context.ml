@@ -1,5 +1,5 @@
-open Util
 open Core
+open Util
 
 let ( @> ) = Snoc.( @> )
 

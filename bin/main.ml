@@ -1,5 +1,6 @@
 open! Language
-open! Parse.Parser
+open! Parse
+open! Parser
 open! Check
 
 let border () =
