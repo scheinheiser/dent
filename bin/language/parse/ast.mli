@@ -1,12 +1,11 @@
 open Util
 open Primitive
 
-(* type definitions *)
 type located_expr = Location.t * expr
 
 and expr =
   | Tuple of located_expr * located_expr
-  | Ap of binder * located_expr * located_expr
+  | Ap of binder * located_expr * bind
   (* we give each function a binder to distinguish between user-defined
      functions and builtins later on *)
   | Let of
@@ -17,11 +16,11 @@ and expr =
   | Match of
       located_expr * (located_expr * located_expr) list
   | If of located_expr * located_expr * located_expr
-  | Lam of located_expr * located_expr
+  | Lam of bind * located_expr
   | Const of const
   | Var of ident
   | TypeLit of prim
-  | Pi of bind * located_expr * located_expr
+  | Pi of bind * located_expr
   | RCons of
       string * (string * located_expr) list (* cons { x₁ = y₁; ...; xₙ = yₙ } *)
   | RUpdate of string * (update_type * string * located_expr) list
@@ -29,9 +28,8 @@ and expr =
   | Hole (* _ *)
   | Impossible (* ! - an impossible pattern *)
   | Annot of located_expr * located_expr (* e ~ t *)
-  | As of string * located_expr (* x@y *)
 
-and bind = string * icit (* identifier, is implicit? *)
+and bind = string * located_expr * icit
 
 and update_type =
   | Assign (* { x where y₁ := z₁ } *)
@@ -52,7 +50,7 @@ and definition =
   | Dec of bool * string * located_expr
   | Def of
       string
-      * located_expr list
+      * bind list
       * located_expr
       * with_block
 (* identifer, args, optional when-block, body, optional with-block *)

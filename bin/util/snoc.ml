@@ -47,7 +47,7 @@ let flatten s =
   in
   go s
 
-let reverse s =
+let rev s =
   let rec go s acc =
     match s with
     | Lin -> acc
@@ -110,7 +110,7 @@ let find_mapi f s =
 
 let combine_errors s =
   let rec go acc = function
-    | Lin -> Some (reverse acc)
+    | Lin -> Some (rev acc)
     | Snoc (xs, x) -> (
       match x with
       | None -> None

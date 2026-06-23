@@ -47,6 +47,7 @@ and token =
   | CONSTRUCTOR
   | UNIVERSE
   | FORALL
+  | IMPOSSIBLE
   | STAR
   | PIPE
   | LBRACE

@@ -47,6 +47,7 @@ and token =
   | CONSTRUCTOR
   | UNIVERSE
   | FORALL
+  | IMPOSSIBLE
   | STAR
   | PIPE
   | LBRACE
@@ -118,6 +119,7 @@ let show (t : token) : string =
   | CONSTRUCTOR -> "CONSTRUCTOR"
   | UNIVERSE -> "UNIVERSE"
   | FORALL -> "FORALL"
+  | IMPOSSIBLE -> "IMPOSSIBLE"
   | STAR -> "STAR"
   | PIPE -> "PIPE"
   | LBRACE -> "LBRACE"

@@ -19,8 +19,7 @@ type located_pattern = Location.t * pattern
 
 and pattern =
   | PWild (* _ *)
-  | PAbs (* ! - an impossible pattern *)
-  | PAs of string * located_pattern (* x@y *)
+  | PAbs (* . - an impossible pattern *)
   | PConst of const
   | PTypeLit of prim
   | PVar of string
@@ -37,34 +36,34 @@ type bd =
 type tm =
   | Local of string * ix (* local variable as de bruijn index *)
   | Top of string (* reference to a top level function *)
-  | Ap of int * tm * tm
+  | Ap of int * tm * tm * icit
   | Mv of mv
   | IMv of mv * bd Snoc.t (* generated mv *)
   | Tuple of tm * tm
   | Let of string * tm * tm * tm (* let p₁ ... pₙ : type = e₁ in e₂ *)
   | Match of tm * (located_pattern * tm) list
     (* match cond to | p₁ when x₁ => y₁ ... | pₙ when xₙ => yₙ*)
-  | Lam of string * tm
+  | Lam of string * icit * tm
   | Const of const
   | TypeLit of prim
-  | Pi of string * tm * tm (* (α : β) -> γ *)
+  | Pi of string * icit * tm * tm (* (α : β) → γ | {α : β} → γ *)
 
 (* values for NbE *)
 and val_ =
-  | VLam of string * closure
+  | VLam of string * icit * closure
   | VTop of string * spine
   | VLocal of string * lvl * spine
   | VMeta of mv * spine
   | VTuple of val_ * val_
   | VMatch of val_ * env * (located_pattern * tm) list
-  | VPi of string * val_ * closure
+  | VPi of string * icit * val_ * closure
   | VTypeLit of prim
   | VConst of const
 
 and env = val_ Snoc.t
 
 (* list of variables that a mv or local is applied to *)
-and spine = val_ Snoc.t
+and spine = (val_ * icit) Snoc.t
 
 and mv_entry =
   | Solved of val_
@@ -88,7 +87,6 @@ type program =
 
 let mctx : mv_entry IM.t ref = ref IM.empty
 
-(* should never fail *)
 let lookup_mv (m : mv) : mv_entry = IM.find m !mctx
 
 let gen_mv bds : tm =
@@ -103,7 +101,6 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
   | PTypeLit p -> pp_prim out p
   | PWild -> Format.fprintf out "_"
   | PAbs -> Format.fprintf out "!"
-  | PAs (i, p) -> Format.fprintf out "%s@(%a)" i pp_pattern p
   | PTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
   | PCtor (i, []) -> Format.fprintf out "%s" i
   | PCtor (i, v) ->
@@ -112,19 +109,25 @@ let rec pp_pattern out ((_, arg) : located_pattern) =
       v
   | PVar i -> Format.fprintf out "%s" i
 
+let wrap_icit icit s =
+  match icit with
+  | Exp -> Printf.sprintf "( %s )" s
+  | Imp -> Printf.sprintf "{ %s }" s
+
 let rec pp_tm out (tm : tm) =
   match tm with
   | Local (i, _) | Top i -> Format.fprintf out "%s" i
   | Const c -> pp_const out c
   | TypeLit p -> pp_prim out p
-  | Ap (_, f, arg) ->
-    Format.fprintf out "(@[<hov>%a@ %@ %a@])" pp_tm f pp_tm arg
+  | Ap (_, f, arg, icit) ->
+    let arg = Format.asprintf "%a" pp_tm arg in
+    Format.fprintf out "(@[<hov>%a@ %@ %s@])" pp_tm f (wrap_icit icit arg)
   | Tuple (l, r) -> Format.fprintf out "(%a, %a)" pp_tm l pp_tm r
   | Let (p, ty, v, n) ->
     Format.fprintf out "@[<v 2>let %s : %a =@,%a@]@,in@,%a" p pp_tm ty pp_tm v
       pp_tm n
-  | Lam (arg, body) ->
-    Format.fprintf out "λ@[<v 2> %s. {@,%a@]@,}" arg pp_tm body
+  | Lam (arg, icit, body) ->
+    Format.fprintf out "λ@[<v 2> %s. {@,%a@]@,}" (wrap_icit icit arg) pp_tm body
   | Match (c, bs) ->
     let pp_branch out (p, b) =
       Format.fprintf out "@[(%a) ⇒ %a@]" pp_pattern p pp_tm b
@@ -132,8 +135,9 @@ let rec pp_tm out (tm : tm) =
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_tm c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
       bs
-  | Pi (n, l, r) ->
-    Format.fprintf out "@[<v>(%s : %a) -> %a@]" n pp_tm l pp_tm r
+  | Pi (n, icit, l, r) ->
+    let l = Format.asprintf "%s : %a" n pp_tm l in
+    Format.fprintf out "@[<v>%s -> %a@]" (wrap_icit icit l) pp_tm r
   | Mv m -> Format.fprintf out "?meta%d" m
   | IMv (m, bds) ->
     let to_str bd =
@@ -149,8 +153,8 @@ let rec pp_val out (v : val_) =
   match v with
   | VTypeLit p -> pp_prim out p
   | VConst c -> pp_const out c
-  | VTop (i, sp) -> Format.fprintf out "%s (%s)" i (pp_sp pp_val sp)
-  | VLam (p, cl) -> Format.fprintf out "λ@[<v> %s. {@,%a@]@,}" p pp_closure cl
+  | VTop (i, sp) -> Format.fprintf out "%s (%s)" i (Snoc.map fst sp |> pp_sp pp_val)
+  | VLam (p, icit, cl) -> Format.fprintf out "λ@[<v> %s. {@,%a@]@,}" (wrap_icit icit p) pp_closure cl
   | VTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_val l pp_val r
   | VMatch (c, _, bs) ->
     let pp_branch out (p, b) =
@@ -159,10 +163,11 @@ let rec pp_val out (v : val_) =
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_val c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
       bs
-  | VPi (n, l, cl) ->
-    Format.fprintf out "(%s : %a) -> %a" n pp_val l pp_closure cl
-  | VLocal (i, _, sp) -> Format.fprintf out "%s (%s)" i (pp_sp pp_val sp)
-  | VMeta (m, sp) -> Format.fprintf out "?meta%d (%s)" m (pp_sp pp_val sp)
+  | VPi (n, icit, l, cl) ->
+    let l = Format.asprintf "%s : %a" n pp_val l in
+    Format.fprintf out "%s -> %a" (wrap_icit icit l) pp_closure cl
+  | VLocal (i, _, sp) -> Format.fprintf out "%s (%s)" i (Snoc.map fst sp |> pp_sp pp_val)
+  | VMeta (m, sp) -> Format.fprintf out "?meta%d (%s)" m (Snoc.map fst sp |> pp_sp pp_val)
 
 and pp_sp pp_func s =
   let open Snoc in

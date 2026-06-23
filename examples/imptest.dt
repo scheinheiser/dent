@@ -1,5 +1,43 @@
 module ImplicitTest
 
+inline
+dec id : ∀ a. a → a
+def id x := x
+
+(* or *)
+
+inline
+dec id' : ∀ a. a → a
+def id' := λ {_} x. x
+
+(*
+for aps;
+  try a string * expr * icit style? expr is value, string MUST be the same name as the binder in the sig
+  you could have this : id Bool true       → "_" * Bool * Exp
+              or this : id {Bool} true     → "_" * Bool * Imp
+              or this : id {a = Bool} true → "a" * Bool * Imp
+
+for lams;
+  try a string * expr * icit? expr is pat, string is essentially an alias
+  you could have this : (λ t x. x)        → "_" * t * Exp
+              or this : (λ {t} x. x)      → "_" * t * imp
+              or this : (λ {t := a} x. x) → "a" * t * Imp
+
+for pis: (already known)
+  try a string * expr * icit
+  you could have this : (Int → Int)       → "_" * Int * Exp
+              or this : ({_ : Int} → Int) → "_" * Int * Imp
+              or this : ({n : Int} → Int) → "n" * Int * Imp
+*)
+
+inline
+dec const : {a, b : U} → a → b → a
+def const := λ x _. x
+
+dec bing : const {a := U} {b := U} Int String → const {U} {U} Float Char → Int
+def bing x y := const {a := Int} x y
+
+(* some proof-y stuff *)
 data ( ≡ ) : (a : U) → a → U =
   Refl : ∀ a. a ≡ a
 

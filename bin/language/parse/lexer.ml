@@ -72,6 +72,7 @@ let builtin_symbol =
     ("|", PIPE);
     ("~", TILDE);
     (".", DOT);
+    ("!", IMPOSSIBLE);
   ]
 
 let digit = [%sedlex.regexp? '0' .. '9']

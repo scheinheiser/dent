@@ -22,4 +22,4 @@ def append (l @: ls) r := l @: (append ls r)
 dec index : ∀ (n ~ Nat) a. Fin n → Vec n a → a
 def index FZ (v @: _) := v
 def index (FS n) (_ @: vs) := index n vs
-def index . Nil (* this case is impossible *)
+def index ! Nil (* this case is impossible *)

@@ -1,5 +1,5 @@
-open Core
 open Util
+open Core
 
 let ( @> ) = Snoc.( @> )
 
@@ -30,6 +30,9 @@ and def =
   | TCon of string list (* a list of all of the data constructors *)
   | Alias of tm
   | Axiom of bool
+
+(* compute the normal form of a term *)
+let nf ctx v = Evaluation.eval ctx.env v |> Evaluation.quote ctx.lvl
 
 let empty_ctx () =
   {

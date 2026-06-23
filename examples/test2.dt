@@ -28,12 +28,15 @@ def chooseType (Right True) := Bool
 def chooseType (Right False) := Float
 *)
 
+dec id : ∀ a. a → a
+def id := λ {a} x. x
+
+(*
 dec testMatch : String → Int
 def testMatch "0" := 10
 def testMatch "1" := 20
 def testMatch _ := 30
 
-(*
 dec ( - ) : Int → Int → Int
 
 dec make : Int → Nat

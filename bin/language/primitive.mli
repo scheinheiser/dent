@@ -5,7 +5,6 @@ type binder = int
 type ident =
   | Ident of string
   | AccessIdent of string * string list
-  | Udc of string (* user defined costructor *)
 
 type const =
   | Int of int
@@ -35,12 +34,13 @@ and import_cond =
   | CWith of ident list
   | CWithout of ident list
 
-(* const *)
+(* utils *)
+val show_icit : icit -> string
+
 val equal_const : const -> const -> bool
 val ( %= ) : const -> const -> bool
 val show_const : const -> string (* shows the name of the constant *)
 
-(* prims *)
 val equal_prim : prim -> prim -> bool
 val ( #= ) : prim -> prim -> bool
 val show_prim : prim -> string

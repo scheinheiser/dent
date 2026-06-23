@@ -12,6 +12,11 @@ let ( @> ) = Snoc.( @> )
 let ( <@ ) = Snoc.( <@ )
 let singleton = Snoc.singleton
 
+(* variable generators *)
+let fresh_pattern_var () : string = "pat$" ^ (fresh_i () |> string_of_int)
+let fresh_bind_var () : string = "b$" ^ (fresh_i () |> string_of_int)
+let fresh_scrut_var () : string = "c_id$" ^ (fresh_i () |> string_of_int)
+
 (* mutable list that holds all of the holes found in source code *)
 let holes : (Location.t * (val_ * val_)) list ref = ref []
 let add_hole v = holes := v :: !holes
@@ -31,63 +36,6 @@ let fmt_holes () =
   Format.asprintf "Fo@[<v 2>und hole(s):@,%a@]"
     Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@,") pp_hole)
     !holes
-
-let to_ix (l : lvl) (r : lvl) = l - r - 1
-
-(* val → tm *)
-let rec quote (lvl : lvl) (v : val_) : tm =
-  match force v with
-  | VTypeLit t -> TypeLit t
-  | VConst c -> Const c
-  | VTop (i, sp) -> quote_sp lvl (Top i) sp
-  | VTuple (l, r) -> Tuple (quote lvl l, quote lvl r)
-  | VMatch (c, env, bs) ->
-    let c = quote lvl c in
-    let quote_b env (p, b) =
-      let rec build_env env (_, p) l =
-        match p with
-        | PWild | PTypeLit _ | PConst _ | PAbs -> (env, l)
-        | PVar i -> (env @> VLocal (i, l, Snoc.empty), l + 1)
-        | PAs (i, p) ->
-          let env, l = build_env env p l in
-          (env @> VLocal (i, l, Snoc.empty), l + 1)
-        | PTuple (l', r) ->
-          let env, l = build_env env l' l in
-          build_env env r l
-        | PCtor (_, args) ->
-          let args, l =
-            List.fold_left
-              (fun (sn, l) n ->
-                let sn, l = build_env sn n l in
-                (sn, l + 1))
-              (env, l) args
-          in
-          (args, l)
-      in
-      let env, l = build_env env p lvl in
-      let b = eval env b |> quote l in
-      (p, b)
-    in
-    let bs = List.map (quote_b env) bs in
-    Match (c, bs)
-  | VLam (p, cl) ->
-    (*
-       increment the level as we move past a binder.
-       add a local with the current level to capture the argument.
-    *)
-    Lam (p, quote (lvl + 1) (cl $$ VLocal (p, lvl, Snoc.empty)))
-  | VPi (n, l, cl) ->
-    let l = quote lvl l in
-    let r = quote (lvl + 1) (cl $$ VLocal (n, lvl, Snoc.empty)) in
-    Pi (n, l, r)
-  | VMeta (m, sp) -> quote_sp lvl (Mv m) sp
-  | VLocal (i, l, sp) -> quote_sp lvl (Local (i, to_ix lvl l)) sp
-
-(* unroll a flex/rigid into a set of applications *)
-and quote_sp (lvl : lvl) (v : tm) (sp : spine) : tm =
-  match sp with
-  | Snoc.Lin -> v
-  | Snoc.Snoc (sp, s) -> Ap (0, quote_sp lvl v sp, quote lvl s)
 
 (* case analysis *)
 type constr = string * located_pattern * val_ (* m /? pat, ty *)
@@ -152,7 +100,7 @@ let invert_mapping (loc : Location.t) (delta : lvl) (sp : spine) :
   let open Snoc in
   let rec go = function
     | Lin -> some (0, IM.empty)
-    | Snoc (sp, s) -> (
+    | Snoc (sp, (s, _)) -> (
       let* gamma, subs = go sp in
       match force s with
       | VLocal (_, l, Snoc.Lin) -> (
@@ -170,10 +118,10 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
     let open Snoc in
     match sp with
     | Lin -> some v
-    | Snoc (sp, s) ->
+    | Snoc (sp, (s, icit)) ->
       let* l = go_sp p sp v in
       let@ r = go p s in
-      Ap (0, l, r)
+      Ap (0, l, r, icit)
   and go p v : tm result =
     match force v with
     | VMeta (mv', sp) ->
@@ -183,19 +131,15 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
         go_sp p sp (Mv mv')
     | VLocal (i, l, sp) -> (
       match IM.find_opt l p.subs with
-      | None ->
-        Log.dbg None
-          (Format.asprintf "rigid(%d) -> %a@.subs -> %d@." l pp_val (force v)
-             (IM.to_list p.subs |> List.length));
-        err (Some loc, Printf.sprintf "Variable '%s' escapes scope." i)
+      | None -> err (Some loc, Printf.sprintf "Variable '%s' escapes scope." i)
       | Some l -> go_sp p sp (Local (i, to_ix p.gamma l)))
-    | VLam (a, cl) ->
+    | VLam (a, icit, cl) ->
       let@ b = go (extend_pn p) (cl $$ VLocal (a, p.delta, Snoc.empty)) in
-      Lam (a, b)
-    | VPi (n, l, cl) ->
+      Lam (a, icit, b)
+    | VPi (n, icit, l, cl) ->
       let* l = go p l in
       let@ r = go (extend_pn p) (cl $$ VLocal (n, p.delta, Snoc.empty)) in
-      Pi (n, l, r)
+      Pi (n, icit, l, r)
     | VMatch (c, env, bs) ->
       let* c = go p c in
       let@ bs =
@@ -219,23 +163,19 @@ let rename (loc : Location.t) (mv : mv) (p : partial) (v : val_) : tm result =
 
 let solve (loc : Location.t) (gamma : lvl) (mv : mv) (sp : spine) (rhs : val_) :
     unit result =
-  let nest lvl v =
-    let rec go n t acc =
-      if n = acc then
-        t
-      else
-        Lam ("x" ^ string_of_int (acc + 1), go n t (acc + 1))
+  let nest icits v =
+    let rec go n icits t =
+      let open Snoc in
+      match icits with
+      | Lin -> t
+      | Snoc (icits, icit) -> Lam ("x" ^ string_of_int (n + 1), icit, go (n + 1) icits t)
     in
-    go lvl v 0
+    go 0 icits v
   in
   let* p = invert_mapping loc gamma sp in
-  Log.dbg None (Format.asprintf "rhs := %a@." pp_val rhs);
   let@ rhs = rename loc mv p rhs in
-  let sol = eval Snoc.empty @@ nest p.gamma rhs in
+  let sol = eval Snoc.empty @@ nest (Snoc.map snd sp |> Snoc.rev) rhs in
   mctx := IM.add mv (Solved sol) !mctx
-
-(* compute the normal form of a term *)
-let nf ctx v = eval ctx.env v |> quote ctx.lvl
 
 let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
   let bump_lvl ctx = {ctx with lvl = ctx.lvl + 1} in
@@ -243,13 +183,10 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
     let open Snoc in
     match (sp, sp') with
     | Lin, Lin -> some ()
-    | Snoc (sp, s), Snoc (sp', s') ->
+    | Snoc (sp, (s, _)), Snoc (sp', (s', _)) ->
       let* _ = unify_sp ctx sp sp' in
       unify ctx s s'
-    | _ ->
-      Log.dbg None (Printf.sprintf "sp := %s\n" (pp_sp pp_val sp));
-      Log.dbg None (Printf.sprintf "sp' := %s\n" (pp_sp pp_val sp'));
-      err (Some ctx.loc, "Rigid mismatch in unification.")
+    | _ -> err (Some ctx.loc, "Rigid mismatch in unification.")
   in
   match (force l, force r) with
   | VTypeLit l, VTypeLit r when l#=r -> some ()
@@ -257,35 +194,32 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
   | VTuple (l, r), VTuple (l', r') ->
     let* _ = unify ctx l l' in
     unify ctx r r'
-  | VPi (n, l, cl), VPi (n', l', cl') ->
+  | VPi (n, icit, l, cl), VPi (n', icit', l', cl') when icit = icit' ->
     (* go into the closure and check that the bound variables are equal *)
     let* _ = unify ctx l l' in
     unify (bump_lvl ctx)
       (cl $$ VLocal (n, ctx.lvl, Snoc.empty))
       (cl' $$ VLocal (n', ctx.lvl, Snoc.empty))
-  | VLam (p, cl), VLam (p', cl') ->
+  | VLam (p, _, cl), VLam (p', _, cl') ->
     unify (bump_lvl ctx)
       (cl $$ VLocal (p, ctx.lvl, Snoc.empty))
       (cl' $$ VLocal (p', ctx.lvl, Snoc.empty))
-  | VLam (p, cl), t | t, VLam (p, cl) ->
+  | VLam (p, icit, cl), t | t, VLam (p, icit, cl) ->
     (*
        check that applying the right to the captured variable is the same as
        going into the closure with the captured variable (fun x -> M x) N => M N
     *)
     unify (bump_lvl ctx)
       (cl $$ VLocal (p, ctx.lvl, Snoc.empty))
-      (v_ap t (VLocal (p, ctx.lvl, Snoc.empty)))
+      (v_ap t (VLocal (p, ctx.lvl, Snoc.empty)) icit)
   | VMatch (c, env, bs), VMatch (c', env', bs')
     when List.length bs = List.length bs' ->
-    (*TODO: unify patterns *)
     let* _ = unify ctx c c' in
     List.map2
       (fun (p, b) (p', b') ->
-        let b = eval env b in
-        let b' = eval env' b' in
-        let* _ = unify_pat ctx p p' in
         (*NOTE: might be a bit weird doing this unification*)
-        unify ctx b b')
+        let* _ = unify_pat ctx p p' in
+        unify ctx (eval env b) (eval env' b'))
       bs bs'
     |> combine_errors_unit
   | VLocal (_, ri, sp), VLocal (_, ri', sp') when ri = ri' ->
@@ -300,8 +234,7 @@ let rec unify (ctx : ctx) (l : val_) (r : val_) : unit result =
     | Some (DCon _, t') | Some (TCon _, t') -> unify ctx t' t
     | Some (RCon _, _) -> Error.todo ""
     | Some (Axiom _, _) ->
-      err (Some ctx.loc, Printf.sprintf "The function '%s' has no definition." i)
-    )
+      err (Some ctx.loc, Printf.sprintf "The function '%s' has no definition." i))
   | VMeta (mv, sp), VMeta (mv', sp') when mv = mv' -> unify_sp ctx sp sp'
   | VMeta (mv, sp), t | t, VMeta (mv, sp) -> solve ctx.loc ctx.lvl mv sp t
   | l, r -> uni_err (Some ctx.loc) l r
@@ -352,11 +285,14 @@ and unify_pat ctx l r : unit result =
           "Pa@[<v 4>ttern unification failed:@,Expected → %a@,Received → %a@,@]"
           pp_pattern l pp_pattern r )
 
+(*TODO: make patterns for `TCon`s, to allow matching on user-defined types.*)
+(*TODO: allow for matching on implicit patterns*)
 let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) :
-    located_pattern result =
+        located_pattern result =
+  let ctx = update_loc loc ctx in
   let rec flatten (_, ap) acc =
     match ap with
-    | Ast.Ap (_, rest, s) -> flatten rest (acc @> s)
+    | Ast.Ap (_, rest, (_, s, _)) -> flatten rest (acc @> s)
     | e -> (e, acc)
   in
   let@ p =
@@ -365,15 +301,21 @@ let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) :
     | Ast.Impossible -> Some PAbs
     | Ast.Const c -> Some (PConst c)
     | Ast.TypeLit t -> Some (PTypeLit t)
-    | Ast.Var (Ident i) -> Some (PVar i)
-    | Ast.Var (Udc i) -> Some (PCtor (i, []))
+    | Ast.Var (Ident i) -> (
+       match lookup_top i ctx with
+       | None -> Some (PVar i)
+       | Some (DCon _, t) ->
+          let a = arity t in
+          if a = 0
+          then Some (PCtor (i,[]))
+          else
+            err (Some ctx.loc, Format.asprintf "Ex@[<v 2>pected %d args:@,Received 0 args.@]@." a)
+       | _ ->
+          err (Some ctx.loc, Format.asprintf "Ex@[<v 2>pected a type constructor:@,Received → %s@]" i))
     | Ast.Tuple (l, r) ->
       let* l = to_pattern ctx l in
       let@ r = to_pattern ctx r in
       PTuple (l, r)
-    | Ast.As (i, p) ->
-      let@ p = to_pattern ctx p in
-      PAs (i, p)
     | Ast.RCons (cons, fs) ->
       let* _, ex_fs, _ = lookup_rcon cons ctx in
       let@ fs =
@@ -391,28 +333,57 @@ let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) :
     | Ast.Ap (_, _, _) as ap -> (
       let base, args = flatten (loc, ap) Snoc.empty in
       match base with
-      | Ast.Var (Udc i) ->
-        let@ ps =
-          List.map (to_pattern ctx) (Snoc.to_list args) |> combine_errors
-        in
-        PCtor (i, ps)
+      | Ast.Var (Ident i) -> (
+         match lookup_top i ctx with
+         | None -> err (Some ctx.loc, Printf.sprintf "Undefined identifier - '%s'.\n" i)
+         | Some (DCon _, _) ->
+            let@ ps =
+              List.map (to_pattern ctx) (Snoc.to_list args) |> combine_errors
+            in
+            PCtor (i, ps)
+         | Some _ -> err (Some ctx.loc, Format.asprintf "Ex@[<v 2>pected a type constructor:@,Received → %s@]" i))
       | e ->
         err
-          ( Some loc,
+          ( Some ctx.loc,
             Format.asprintf
               "Ex@[<v 2>pected a type constructor:@,Received → %a@]@."
               Ast.pp_expr (loc, e) ))
     | e ->
       err
-        ( Some loc,
+        ( Some ctx.loc,
           Format.asprintf "Ex@[<v 2>pected a pattern:@,Received → %a@]@."
             Ast.pp_expr (loc, e) )
   in
   (loc, p)
 
-let fresh_pattern_var () : string = "pat$" ^ (fresh_i () |> string_of_int)
-let fresh_bind_var () : string = "b$" ^ (fresh_i () |> string_of_int)
-let fresh_scrut_var () : string = "c_id$" ^ (fresh_i () |> string_of_int)
+let rec insert (ctx : ctx) (infer_res : (tm * val_) result) : (tm * val_) result =
+  let* t, tty = infer_res in
+  match t with
+  | Lam (_, Imp, _) -> some (t, tty)
+  | _ -> insert_aux ctx infer_res
+and insert_aux (ctx : ctx) (infer_res : (tm * val_) result) : (tm * val_) result =
+  let* t, tty = infer_res in
+  let rec go (t, tty) =
+    match force tty with
+    | VPi (_, Imp, _, cl) ->
+       let meta = gen_mv ctx.bds in
+       go (Ap (0, t, meta, Imp), cl $$ eval ctx.env meta)
+    | _ -> some (t, tty)
+  in
+  go (t, tty)
+
+let insert_until_name (ctx: ctx) (n : string) (infer_res : (tm * val_) result) : (tm * val_) result =
+  let* t, tty = infer_res in
+  let rec go (t, tty) =
+    match force tty with
+    | VPi (n', Imp, _, cl) ->
+       if n = n'
+       then some (t, tty)
+       else
+         let meta = gen_mv ctx.bds in
+         go (Ap (0, t, meta, Imp), cl $$ eval ctx.env meta)
+    | _ -> err (Some ctx.loc, Printf.sprintf "Failed to find implicit identifier - '%s'.\n" n)
+  in go (t, tty)
 
 let replace_pattern ((_, p) : Ast.located_expr)
     ((loc, _) as b : Ast.located_expr) : string * Ast.located_expr =
@@ -432,12 +403,15 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     =
   let ctx = update_loc loc ctx in
   match (e, force ex) with
-  | Ast.Lam (p, b), VPi (_, l, cl) ->
+  | Ast.Lam ((n, p, icit), b), VPi (n', icit', l, cl) when icit = icit' && n = n' ->
     let i, b = replace_pattern p b in
     let@ b =
       check (bind_var ~id:i ~t:l ctx) b (cl $$ VLocal (i, ctx.lvl, Snoc.empty))
     in
-    Lam (i, b)
+    Lam (i, icit, b)
+  | t, VPi (n, icit, l, cl) ->
+     let@ b = check (bind_var ~id:n ~t:l ctx) (loc, t) (cl $$ VLocal (n, ctx.lvl, Snoc.empty)) in
+     Lam (n, icit, b)
   | Ast.If (c, t, f), t' ->
     let t = ((loc, Ast.Const (Bool true)), t) in
     let f = ((loc, Ast.Const (Bool false)), f) in
@@ -472,7 +446,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     let@ ctree = build_tree ctx {clauses = cs; target = t'} in
     Let (c_id, quote 0 t, c, ctree)
   | e, ex ->
-    let* e, t = infer ctx (loc, e) in
+    let* e, t = insert ctx @@ infer ctx (loc, e) in
     let@ _ = unify ctx t ex in
     e
 
@@ -502,8 +476,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   | Ast.Annot (e, t) ->
     let* t, _ = is_type ctx t in
     let t = eval ctx.env t in
-    let* e, t' = infer ctx e in
-    let@ _ = unify ctx t t' in
+    let@ e = check ctx e t in
     (e, t)
   | Ast.Const c ->
     let t =
@@ -520,11 +493,11 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     let* l, lt = infer ctx l in
     let@ r, rt = infer ctx r in
     (Tuple (l, r), VTuple (lt, rt))
-  | Ast.Var (Ident i) | Ast.Var (Udc i) -> (
+  | Ast.Var (Ident i) -> (
     match lookup_top i ctx with
     | Some (DCon (_, b), t) -> some (b, t)
     | Some (Alias base, t) -> some (base, t)
-    | Some (Def (true, b), t) -> some (b, t)
+    | Some (Def (true, b), t) -> some (b, t) (* an inlined function *)
     | Some (_, t) -> some (Top i, t)
     | None ->
       let@ n, t = lookup_local i ctx in
@@ -555,36 +528,51 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     let i = Printf.sprintf "%s.%s" base (String.concat "." is) in
     Log.dbg None (Format.asprintf "%s := %a@." i pp_val t);
     (Local (i, n), t)
-  | Ast.Lam (x, t) ->
+  | Ast.Lam ((n, x, icit), t) when n = "_" (* can't infer a named lambda *) ->
     let x, t = replace_pattern x t in
     let a = eval ctx.env @@ gen_mv ctx.bds in
-    let@ t, b = infer (bind_var ~id:x ~t:a ctx) t in
+    let@ t, b = insert ctx @@ infer (bind_var ~id:x ~t:a ctx) t in
     let b = (ctx.env, quote (ctx.lvl + 1) b) in
-    (Lam (x, t), VPi (x, a, b))
-  | Ast.Ap (b, l, r) ->
+    (Lam (x, icit, t), VPi (x, icit, a, b))
+  | Ast.Ap (b, l, (n, r, icit)) ->
     (*TODO: recognise builtins. *)
-    Log.dbg None (Format.asprintf "l := %a@." Ast.pp_expr l);
-    let* l, lt = infer ctx l in
+    let* icit, l, lt =
+      match n, icit with
+      | "_", Imp ->
+         let@ l, lt = infer ctx l in
+         Imp, l, lt
+      | "_", Exp ->
+         let@ l, lt = insert ctx @@ infer ctx l in
+         Exp, l, lt
+      | n, Imp ->
+         let@ l, lt = insert_until_name ctx n @@ infer ctx l in
+         Imp, l, lt
+      (*TODO: maybe use this to implement named arguments??*)
+      | _ -> Error.internal "can't have a named explicit argument."
+    in
     let* lt, ret =
       match force lt with
-      | VPi (_, lt, ret) -> some (lt, ret)
+      | VPi (_, icit', lt, ret) ->
+         if icit = icit'
+         then some (lt, ret)
+         else err (Some ctx.loc, Printf.sprintf "Fo@[<v 2>und an icity mismatch:@,Expected → %s@,Received → %s@]" (show_icit icit') (show_icit icit))
       | lt ->
         let lt' = eval ctx.env @@ gen_mv ctx.bds in
         let r' = (ctx.env, gen_mv (bind_var ~id:"x" ~t:lt ctx).bds) in
-        let@ _ = unify ctx (VPi ("x", lt', r')) lt in
+        let@ _ = unify ctx (VPi ("x", icit, lt', r')) lt in
         (lt', r')
     in
     Log.dbg None (Format.asprintf "r := %a@." Ast.pp_expr r);
     let@ r = check ctx r lt in
     Log.dbg None
-      (Format.asprintf "ap → %a@.ty → %a@." pp_tm (Ap (b, l, r)) pp_closure ret);
-    (Ap (b, l, r), ret $$ eval ctx.env r)
-  | Ast.Pi ((i, _), l, r) ->
+      (Format.asprintf "ap → %a@.ty → %a@." pp_tm (Ap (b, l, r, icit)) pp_closure ret);
+    (Ap (b, l, r, icit), ret $$ eval ctx.env r)
+  | Ast.Pi ((i, l, icit), r) ->
     let* l, n = is_type ctx l in
     let ctx = bind_var ~id:i ~t:(eval ctx.env l) ctx in
     let@ r, n' = is_type ctx r in
     let n = Int.max n n' in
-    (Pi (i, l, r), VTypeLit (PUni n))
+    (Pi (i, icit, l, r), VTypeLit (PUni n))
   | Ast.Let (p, t, b, n) -> (
     let i, b = replace_pattern p b in
     match t with
@@ -624,7 +612,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
           ex_fs
         |> combine_errors
       in
-      let e = List.fold_left (fun n acc -> Ap (0, n, acc)) (Top cons) fs in
+      let e = List.fold_left (fun n acc -> Ap (0, n, acc, Exp)) (Top cons) fs in
       (*TODO: handle parameterised records, i.e. MyRec α *)
       (e, VTop (tcon, Snoc.empty))
   | Ast.RUpdate (base, fs) ->
@@ -648,12 +636,12 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
           | Some (Ast.Apply, _, ((loc, _) as f)) ->
             (* { x where y =@ f } ⇒ { x where y := f x.y } *)
             let field = (loc, Ast.Var (AccessIdent (base, [ex_i]))) in
-            let v = (loc, Ast.Ap (0, f, field)) in
+            let v = (loc, Ast.Ap (0, f, ("_", field, Exp))) in
             check ctx v ex_t)
         ex_fs
       |> combine_errors
     in
-    let e = List.fold_left (fun n acc -> Ap (0, n, acc)) (Top cons) fs in
+    let e = List.fold_left (fun n acc -> Ap (0, n, acc, Exp)) (Top cons) fs in
     (e, ret)
   | e -> Error.todo (Format.asprintf "finish infer - %a" Ast.pp_expr (loc, e))
 
@@ -714,7 +702,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         let n = rename n in
         (loc, Ast.Let (i, ty, b, n))
       | Ast.Tuple (l, r) -> (loc, Ast.Tuple (rename l, rename r))
-      | Ast.Ap (b, l, r) -> (loc, Ast.Ap (b, rename l, rename r))
+      | Ast.Ap (b, l, (n, r, icit)) -> (loc, Ast.Ap (b, rename l, (n, rename r, icit)))
       | Ast.Match (sc, bs) ->
         let bs =
           List.map
@@ -724,7 +712,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         (loc, Ast.Match (rename sc, bs))
       | Ast.If (c, t, f) -> (loc, Ast.If (rename c, rename t, rename f))
       | Ast.Lam (p, b) -> (loc, Ast.Lam (p, rename b))
-      | Ast.Pi (b, l, r) -> (loc, Ast.Pi (b, rename l, rename r))
+      | Ast.Pi ((n, l, i), r) -> (loc, Ast.Pi ((n, rename l, i), rename r))
       | Ast.RCons (cons, fs) ->
         let fs = List.map (fun (i, e) -> (i, rename e)) fs in
         (loc, Ast.RCons (cons, fs))
@@ -745,7 +733,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
   in
   match (prob.clauses, prob.target) with
   | [], _ -> Error.internal "no cases in build_tree."
-  | (_, Snoc.Snoc (_, _), _) :: _, VPi (_, l, cl) ->
+  | (_, Snoc.Snoc (_, _), _) :: _, VPi (_, _, l, cl) ->
     let n = fresh_scrut_var () in
     let r = cl $$ VLocal (n, ctx.lvl, Snoc.empty) in
     let ctx = bind_var ~id:n ~t:l ctx in
@@ -759,7 +747,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
       |> combine_errors
     in
     let@ b = build_tree ctx {clauses; target = r} in
-    Lam (n, b)
+    Lam (n, Exp, b)
   | (constrs, Snoc.Lin, c_body) :: _, target -> (
     match find_split constrs with
     | None -> done_ ctx target constrs c_body
@@ -782,19 +770,10 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         in
         (* | S Z ==> | S (pat$1 ~ Nat) *)
         let push_names ctx dcty =
-          let arity pi =
-            let rec go n = function
-              | VPi (i, _, cl) ->
-                let n = n + 1 in
-                go n (cl $$ VLocal (i, n, Snoc.empty))
-              | _ -> n
-            in
-            go 0 pi
-          in
           (* create binding variables over a constructor, using its type sigature *)
           let rec bind_over_pi ctx lvl pi ps acc =
             match (ps, pi) with
-            | p :: ps, VPi (n, l, cl) ->
+            | p :: ps, VPi (n, _, l, cl) ->
               bind_over_pi (bind_var ~id:p ~t:l ctx) (lvl + 1)
                 (cl $$ VLocal (n, lvl, Snoc.empty))
                 ps
@@ -1185,6 +1164,7 @@ and check_locals ctx locals =
       List.filter_map
         (function
           | loc, Ast.Def (i, args, b, locals) ->
+            let args = List.map (fun (_, a, _) -> a) args in
             Some (loc, (i, args, b, locals))
           | _ -> None)
         locals
@@ -1215,7 +1195,7 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
         let id_stack =
           let rec go pi acc =
             match pi with
-            | Pi (n, _, r) -> go r (acc @> n)
+            | Pi (n, icit, _, r) -> go r (acc @> (n, icit))
             | _ -> acc
           in
           go pi Snoc.empty
@@ -1223,21 +1203,21 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
         (* ( × ) a b ⇒ ( × ) 1 0 *)
         let ap, _ =
           Snoc.fold_left
-            (fun (acc, n) i -> (Ap (0, acc, Local (i, n)), n + 1))
+            (fun (acc, n) (i, icit) -> (Ap (0, acc, Local (i, n), icit), n + 1))
             (Top cons, 0) id_stack
         in
         (* ( × ) 1 0 ⇒ λ λ. ( × ) 1 0 *)
-        let v = Snoc.fold_right (fun i acc -> Lam (i, acc)) id_stack ap in
+        let v = Snoc.fold_right (fun (i, icit) acc -> Lam (i, icit, acc)) id_stack ap in
         Log.dbg None (Format.asprintf "Turned pi into %a@." pp_tm v);
         v
       in
       let params_to_pi params =
         let ret, _ =
           List.fold_left
-            (fun (ap, n) (i, _) -> (Ap (0, ap, Local (i, n)), n + 1))
+            (fun (ap, n) (i, _) -> (Ap (0, ap, Local (i, n), Exp), n + 1))
             (TypeLit (PUni 0), 0) params
         in
-        List.fold_right (fun (i, t) acc -> Pi (i, t, acc)) params ret
+        List.fold_right (fun (i, t) acc -> Pi (i, Exp, t, acc)) params ret
       in
       (* we check fields/variants in the form of string * located_expr. *)
       let rec check_assoc ?(bind = ("", false)) ctx acc as_ =
@@ -1301,7 +1281,7 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
             (* build a type signature for the record *)
             let csig =
               List.fold_right
-                (fun (_, n) acc -> Pi (fresh_bind_var (), n, acc))
+                (fun (_, n) acc -> Pi (fresh_bind_var (), Exp, n, acc))
                 fs sig_
             in
             Log.dbg None (Format.asprintf "csig := %a@." pp_tm csig);
@@ -1346,7 +1326,7 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let* defs =
       List.map
         (fun (loc, (i, args, b, locals)) ->
-          let@ args = List.map (to_pattern ctx) args |> combine_errors in
+          let@ args = List.map (fun (_, a, _) -> to_pattern ctx a) args |> combine_errors in
           (loc, (i, args, b, locals)))
         defs
       |> combine_errors

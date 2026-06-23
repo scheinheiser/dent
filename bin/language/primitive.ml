@@ -6,7 +6,6 @@ type binder = int
 type ident =
   | Ident of string
   | AccessIdent of string * string list
-  | Udc of string (* user defined costructor *)
 
 type const =
   | Int of int
@@ -37,6 +36,10 @@ and import_cond =
   | CWithout of ident list
 
 (* utils *)
+let show_icit = function
+  | Imp -> "Implicit"
+  | Exp -> "Explicit"
+
 let rec equal_const l r =
   match (l, r) with
   | Int l, Int r -> l = r
@@ -81,13 +84,13 @@ let show_prim = function
 
 (* idents *)
 let get_str = function
-  | Ident i | Udc i -> i
+  | Ident i -> i
   | AccessIdent (base, is) -> Printf.sprintf "%s.%s" base (String.concat "." is)
 
 (* pretty printing *)
 let pp_ident out (i : ident) =
   match i with
-  | Ident i | Udc i -> Format.fprintf out "%s" i
+  | Ident i -> Format.fprintf out "%s" i
   | AccessIdent (i, is) -> Format.fprintf out "%s.%s" i (String.concat "." is)
 
 let pp_prim out (t : prim) = Format.fprintf out "%s" (show_prim t)

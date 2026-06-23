@@ -337,7 +337,7 @@ module Parser = struct
       ( (fun l ->
           let@ e, fields = parse_record_fields l om in
           (Location.combine s e, Ast.RCons (i, fields)))
-      <|> fun _ -> ok (s, Ast.Var (Udc i)) )
+      <|> fun _ -> ok (s, Ast.Var (Ident i)) )
         l
     | s, DOT_SEP_IDENT (i, is) -> ok (s, Ast.Var (AccessIdent (i, is)))
     | s, LET -> parse_let l om s
@@ -346,7 +346,7 @@ module Parser = struct
     | s, MATCH -> parse_match l om s
     | s, FORALL -> parse_forall l om s
     | s, LBRACE ->
-      ( (fun l -> parse_binding l ~icit:Imp s om) <|> fun l ->
+      ( (fun l -> parse_pi_binding l ~icit:Imp s om) <|> fun l ->
         let* ru = parse_record_update l om in
         let@ e =
           Lexer.consume_with_pos l RBRACE "Expected '}' to end record update."
@@ -363,7 +363,7 @@ module Parser = struct
             in
             let loc = Location.combine s e in
             (loc, Ast.Var (Ident o)))
-        <|> fun l -> parse_binding l ~icit:Exp s om )
+        <|> fun l -> parse_pi_binding l ~icit:Exp s om )
       <|> fun l ->
         let* _, expr = parse_expr l 0 om in
         match Lexer.current l with
@@ -378,7 +378,8 @@ module Parser = struct
                 (Token.show tok) ) )
         l
     | s, OP o ->
-      let@ ((e, _) as v) = parse_expr l (get_bp_with_fixity o om) om in
+      let prec = get_bp_with_fixity o om in
+      let@ (_, (e, _), _) as v = parse_binding l (fun l -> parse_expr l prec om) in
       (Location.combine s e, Ast.Ap (0, (s, Ast.Var (Ident o)), v))
     | pos, tok ->
       Lexer.make_err
@@ -388,16 +389,18 @@ module Parser = struct
 
   and led (l : Lexer.t) (left : Ast.located_expr) (s : Location.t)
       (op : Token.token) (om : operator_map) : Ast.located_expr Lexer.result =
+    let parse_binding_aux l prec om = parse_binding l (fun l -> parse_expr l prec om) in
     let@ expr =
       match op with
       | OP o ->
-        let@ r = parse_expr l (get_bp_with_fixity o om) om in
+        let prec = get_bp_with_fixity o om in
+        let@ r = parse_binding_aux l prec om in
         let loc, _ = left in
         let op = (loc, Ast.Var (Ident o)) in
-        Ast.Ap (0, (loc, Ast.Ap (0, op, left)), r)
+        Ast.Ap (0, (loc, Ast.Ap (0, op, ("_", left, Exp))), r)
       | ARROW ->
         let@ r = parse_expr l 0 om in
-        Ast.Pi (("_", Exp), left, r)
+        Ast.Pi (("_", left, Exp), r)
       | TILDE ->
         let@ r = parse_expr l 0 om in
         Ast.Annot (left, r)
@@ -410,53 +413,55 @@ module Parser = struct
           Lexer.consume_with_pos l BTICK
             "Expected another '`' for an infix function application."
         in
-        let@ r = parse_expr l (get_bp_with_fixity f om) om in
+        let@ r = parse_binding_aux l (get_bp_with_fixity f om) om in
         let loc = Location.combine (fst left) e in
         let f = (loc, Ast.Var (Ident f)) in
-        Ast.Ap (0, (loc, Ast.Ap (0, f, left)), r)
-      | WILDCARD -> ok (Ast.Ap (0, left, (s, Ast.Hole)))
-      | INT i -> ok (Ast.Ap (0, left, (s, Ast.Const (Int i))))
-      | FLOAT f -> ok (Ast.Ap (0, left, (s, Ast.Const (Float f))))
-      | CHAR c -> ok (Ast.Ap (0, left, (s, Ast.Const (Char c))))
-      | STRING str -> ok (Ast.Ap (0, left, (s, Ast.Const (String str))))
-      | BOOL b -> ok (Ast.Ap (0, left, (s, Ast.Const (Bool b))))
-      | UNIT -> ok (Ast.Ap (0, left, (s, Ast.Const Unit)))
-      | TY_INT -> ok (Ast.Ap (0, left, (s, Ast.TypeLit PInt)))
-      | TY_FLOAT -> ok (Ast.Ap (0, left, (s, Ast.TypeLit PFloat)))
-      | TY_STRING -> ok (Ast.Ap (0, left, (s, Ast.TypeLit PString)))
-      | TY_CHAR -> ok (Ast.Ap (0, left, (s, Ast.TypeLit PChar)))
-      | TY_BOOL -> ok (Ast.Ap (0, left, (s, Ast.TypeLit PBool)))
-      | TY_UNIT -> ok (Ast.Ap (0, left, (s, Ast.TypeLit PUnit)))
+        Ast.Ap (0, (loc, Ast.Ap (0, f, ("_", left, Exp))), r)
+      | WILDCARD -> ok (Ast.Ap (0, left, (("_", (s, Ast.Hole), Exp))))
+      | INT i -> ok (Ast.Ap (0, left, ("_", (s, Ast.Const (Int i)), Exp)))
+      | FLOAT f -> ok (Ast.Ap (0, left, ("_", (s, Ast.Const (Float f)), Exp)))
+      | CHAR c -> ok (Ast.Ap (0, left, ("_", (s, Ast.Const (Char c)), Exp)))
+      | STRING str -> ok (Ast.Ap (0, left, ("_", (s, Ast.Const (String str)), Exp)))
+      | BOOL b -> ok (Ast.Ap (0, left, ("_", (s, Ast.Const (Bool b)), Exp)))
+      | UNIT -> ok (Ast.Ap (0, left, ("_", (s, Ast.Const Unit), Exp)))
+      | TY_INT -> ok (Ast.Ap (0, left, ("_", (s, Ast.TypeLit PInt), Exp)))
+      | TY_FLOAT -> ok (Ast.Ap (0, left, ("_", (s, Ast.TypeLit PFloat), Exp)))
+      | TY_STRING -> ok (Ast.Ap (0, left, ("_", (s, Ast.TypeLit PString), Exp)))
+      | TY_CHAR -> ok (Ast.Ap (0, left, ("_", (s, Ast.TypeLit PChar), Exp)))
+      | TY_BOOL -> ok (Ast.Ap (0, left, ("_", (s, Ast.TypeLit PBool), Exp)))
+      | TY_UNIT -> ok (Ast.Ap (0, left, ("_", (s, Ast.TypeLit PUnit), Exp)))
       | IDENT i ->
-        let r = (s, Ast.Var (Ident i)) in
+        let r = "_", (s, Ast.Var (Ident i)), Exp in
         ok @@ Ast.Ap (0, left, r)
       | UPPER_IDENT i ->
         let* r =
           ( (fun l ->
               let@ e, fields = parse_record_fields l om in
               (Location.combine s e, Ast.RCons (i, fields)))
-          <|> fun _ -> ok (s, Ast.Var (Udc i)) )
+          <|> fun _ -> ok (s, Ast.Var (Ident i)) )
             l
         in
-        ok @@ Ast.Ap (0, left, r)
+        ok @@ Ast.Ap (0, left, ("_", r, Exp))
       | DOT_SEP_IDENT (i, is) ->
         let r = (s, Ast.Var (AccessIdent (i, is))) in
-        ok @@ Ast.Ap (0, left, r)
+        ok @@ Ast.Ap (0, left, ("_", r, Exp))
       | UNIVERSE ->
         let@ r = parse_universe_level l s in
-        Ast.Ap (0, left, r)
+        Ast.Ap (0, left, ("_", r, Exp))
       | LBRACK ->
         let@ r = parse_list l om s in
-        Ast.Ap (0, left, r)
+        Ast.Ap (0, left, ("_", r, Exp))
       | LBRACE ->
         let@ r =
-          ( (fun l -> parse_binding ~icit:Imp l s om) <|> fun l ->
+          ( (fun l -> let@ p = parse_pi_binding ~icit:Imp l s om in "_", p, Exp)
+            <|> (fun l -> parse_implicit_binding l (fun l -> parse_expr l 0 om))
+            <|> fun l ->
             let* ru = parse_record_update l om in
             let@ e =
               Lexer.consume_with_pos l RBRACE
                 "Expected '}' to end record update."
             in
-            (Location.combine s e, ru) )
+            ("_", (Location.combine s e, ru), Exp) )
             l
         in
         Ast.Ap (0, left, r)
@@ -469,16 +474,16 @@ module Parser = struct
                   "Expected ')' after prefix operator."
               in
               let loc = Location.combine s e in
-              Ast.Ap (0, left, (loc, Ast.Var (Ident o))))
+              Ast.Ap (0, left, ("_", (loc, Ast.Var (Ident o)), Exp)))
           <|> fun l ->
-            let@ r = parse_binding ~icit:Exp l s om in
-            Ast.Ap (0, left, r) )
+            let@ r = parse_pi_binding ~icit:Exp l s om in
+            Ast.Ap (0, left, ("_", r, Exp)) )
         <|> fun l ->
           let* _, expr = parse_expr l 0 om in
           match Lexer.current l with
           | e, RPAREN ->
             Lexer.skip ~am:1 l;
-            ok @@ Ast.Ap (0, left, (Location.combine s e, expr))
+            ok @@ Ast.Ap (0, left, ("_", (Location.combine s e, expr), Exp))
           | pos, tok ->
             Lexer.make_err
               ( Some pos,
@@ -518,18 +523,18 @@ module Parser = struct
             "Expected ']' to end empty list constructor."
         in
         let loc = Location.combine s e in
-        (loc, Ast.Var (Udc "Nil")))
+        (loc, Ast.Var (Ident "Nil")))
     <|> fun l ->
       let* es = Lexer.separated_list l ~sep:SEMI (fun e -> parse_expr e 0 om) in
       let@ e = Lexer.consume_with_pos l RBRACK "Expected ']' to end list." in
       let loc = Location.combine s e in
       let op = (loc, Ast.Var (Ident "::")) in
       List.fold_right
-        (fun n acc -> (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, n)), acc)))
+        (fun n acc -> (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, ("_", n, Exp))), ("_", acc, Exp))))
         (List.tl es) (List.hd es) )
       l
 
-  and parse_binding (l : Lexer.t) ~(icit : icit) (s : Location.t)
+  and parse_pi_binding (l : Lexer.t) ~(icit : icit) (s : Location.t)
       (om : operator_map) : Ast.located_expr Lexer.result =
     let r_paren =
       match icit with
@@ -555,7 +560,30 @@ module Parser = struct
     in
     let@ ((e, _) as r) = parse_expr l 0 om in
     let loc = Location.combine s e in
-    List.fold_right (fun n acc -> (loc, Ast.Pi ((n, icit), l', acc))) is r
+    List.fold_right (fun n acc -> (loc, Ast.Pi ((n, l', icit), acc))) is r
+
+  (* {a := t} | {t} *)
+  and parse_implicit_binding (l: Lexer.t) (p_func : Lexer.t -> Ast.located_expr Lexer.result) : Ast.bind Lexer.result =
+    let* id =
+      match Lexer.current l with
+      | _, IDENT i ->
+         Lexer.skip ~am:1 l;
+         let@ _ = Lexer.consume l ASSIGNMENT "Expected ':=' to separate identifier and expression in a bind." in
+         i
+      | _ -> ok "_"
+    in
+    let* e = p_func l in
+    let@ _ = Lexer.consume l RBRACE "Expected '}' to end implicit binding" in
+    id, e, Imp
+
+  (* {a := t} | {t} | t *)
+  and parse_binding (l: Lexer.t) (p_func : Lexer.t -> Ast.located_expr Lexer.result) : Ast.bind Lexer.result =
+    ((fun l ->
+      let* _ = Lexer.consume l LBRACE "Expected '{' to begin implicit binding." in
+      parse_implicit_binding l p_func)
+    <|> (fun l ->
+      let@ e = p_func l in
+      "_", e, Exp)) l
 
   and parse_type_ident (l : Lexer.t) (om : operator_map) :
       (string * Ast.located_expr) Lexer.result =
@@ -594,8 +622,7 @@ module Parser = struct
     let loc = Location.combine s e in
     List.fold_right
       (fun (i, t) acc ->
-        let bind = (i, Imp) in
-        (loc, Ast.Pi (bind, t, acc)))
+        (loc, Ast.Pi ((i, t, Imp), acc)))
       binds t
 
   and parse_record_fields (l : Lexer.t) (om : operator_map) :
@@ -615,7 +642,7 @@ module Parser = struct
           (id, v))
       <|>
       (*
-         record punning; 
+         record punning;
          cons { x₁; ...; xₙ } ⇒ cons { x₁ = x₁; ...; xₙ = xₙ }
          checking if it's a valid field occurs in elaboration.
       *)
@@ -688,7 +715,7 @@ module Parser = struct
     let* (loc, _) as expr = parse_expr l 0 om in
     let p, expr =
       (* let id A t := t in ... ===> let id := λ A. λ t. t in ... *)
-      let id, args = List.hd ps, List.tl ps in
+      let (_, id, _), args = List.hd ps, List.tl ps in
       let expr = List.fold_right (fun arg b -> loc, Ast.Lam (arg, b)) args expr in
       id, expr
     in
@@ -737,11 +764,12 @@ module Parser = struct
     (Location.combine s (Lexer.current_pos l), Ast.Match (expr, branches))
 
   and parse_args (l : Lexer.t) (om : operator_map) :
-      Ast.located_expr list Lexer.result =
+      Ast.bind list Lexer.result =
     Lexer.list_with_end l
       (function
         | WILDCARD
-        | DOT
+        | IMPOSSIBLE
+        | LBRACE (* for implicit arguments *)
         | LBRACK
         | LPAREN
         | IDENT _
@@ -761,25 +789,15 @@ module Parser = struct
         | TY_BOOL
         | UNIVERSE -> false
         | _ -> true)
-      (flip parse_pattern om)
+      (fun l -> parse_binding l (flip parse_pattern om))
 
   and parse_pattern ?(ctor_delim = None) (l : Lexer.t) (om : operator_map) :
       Ast.located_expr Lexer.result =
     let* p =
       match Lexer.advance l with
       | s, WILDCARD -> ok (s, Ast.Hole)
-      | s, DOT -> ok (s, Ast.Impossible)
-      | s, IDENT i ->
-        ( (fun l ->
-            let* i = parse_lower_ident l in
-            let* _ =
-              Lexer.consume l ATSIGN
-                "Expected '@' after identifier in as-pattern."
-            in
-            let@ ((e, _) as p) = parse_pattern l om in
-            (Location.combine s e, Ast.As (i, p)))
-        <|> fun _ -> ok (s, Ast.Var (Ident i)) )
-          l
+      | s, IMPOSSIBLE -> ok (s, Ast.Impossible)
+      | s, IDENT i -> ok (s, Ast.Var (Ident i))
       | s, UPPER_IDENT i ->
         ( ( (fun l ->
               let@ e, fs = parse_record_fields l om in
@@ -795,9 +813,9 @@ module Parser = struct
               in
               let loc = Location.combine s (Lexer.current_pos l) in
               List.fold_left
-                (fun ap n -> (loc, Ast.Ap (0, ap, n)))
-                (loc, Ast.Var (Udc i)) ps )
-        <|> fun _ -> ok (s, Ast.Var (Udc i)) )
+                (fun ap n -> (loc, Ast.Ap (0, ap, ("_", n, Exp))))
+                (loc, Ast.Var (Ident i)) ps )
+        <|> fun _ -> ok (s, Ast.Var (Ident i)) )
           l
       | s, INT n -> ok (s, Ast.Const (Int n))
       | s, FLOAT f -> ok (s, Ast.Const (Float f))
@@ -833,7 +851,7 @@ module Parser = struct
               Lexer.consume l ARROW "Expected '->' or '→' for a Pi pattern."
             in
             let@ ((e, _) as r) = parse_pattern l om in
-            (Location.combine s e, Ast.Pi (("_", Exp), left, r)))
+            (Location.combine s e, Ast.Pi (("_", left, Exp), r)))
         <|> fun l ->
           let* _ = Lexer.consume l COMMA "Expected ',' for a tuple pattern." in
           let@ ((e, _) as r) = parse_pattern l om in
@@ -842,8 +860,8 @@ module Parser = struct
         let* o = parse_user_op l in
         let@ ((e, _) as r) = parse_pattern l om in
         let loc = Location.combine s e in
-        let op = (loc, Ast.Var (Udc o)) in
-        (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, left)), r)) )
+        let op = (loc, Ast.Var (Ident o)) in
+        (loc, Ast.Ap (0, (loc, Ast.Ap (0, op, ("_", left, Exp))), ("_", r, Exp))) )
     <|> fun _ -> ok left )
       l
 
