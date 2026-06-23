@@ -38,10 +38,11 @@ let fmt_holes () =
     !holes
 
 (* case analysis *)
-type constr = string * located_pattern * val_ (* m /? pat, ty *)
+type bind = located_pattern * icit
+type constr = string * bind * val_ (* m /? pat, ty *)
 
 and clause =
-  constr Snoc.t * located_pattern Snoc.t * Ast.located_expr
+  constr Snoc.t * bind Snoc.t * Ast.located_expr
 (* pattern constraints, remaining patterns and body *)
 
 and problem = {
@@ -50,8 +51,13 @@ and problem = {
 }
 
 (* for debugging *)
-let pp_constr out (i, p, t) =
-  Format.fprintf out "%s /? %a ~ %a" i pp_pattern p pp_val t
+let pp_constr out (i, (p, icit), t) =
+  let p =
+    match icit with
+    | Exp -> Format.asprintf "%a" pp_pattern p
+    | Imp -> Format.asprintf "{ %a }" pp_pattern p
+  in
+  Format.fprintf out "%s /? %s ~ %a" i p pp_val t
 
 let pp_clause out (cs, ps, _, b) =
   let cs, ps = (Snoc.to_list cs, Snoc.to_list ps) in
@@ -304,12 +310,12 @@ let rec to_pattern (ctx : ctx) ((loc, e) : Ast.located_expr) :
     | Ast.Var (Ident i) -> (
        match lookup_top i ctx with
        | None -> Some (PVar i)
-       | Some (DCon _, t) ->
-          let a = arity t in
-          if a = 0
-          then Some (PCtor (i,[]))
-          else
-            err (Some ctx.loc, Format.asprintf "Ex@[<v 2>pected %d args:@,Received 0 args.@]@." a)
+       | Some (DCon _, _) -> Some (PCtor (i, []))
+          (* let a = arity t in *)
+          (* if a = 0 *)
+          (* then Some (PCtor (i,[])) *)
+          (* else *)
+          (*   err (Some ctx.loc, Format.asprintf "Ex@[<v 4>pected %d args:@,Received → 0 args.@]@." a) *)
        | _ ->
           err (Some ctx.loc, Format.asprintf "Ex@[<v 2>pected a type constructor:@,Received → %s@]" i))
     | Ast.Tuple (l, r) ->
@@ -386,7 +392,7 @@ let insert_until_name (ctx: ctx) (n : string) (infer_res : (tm * val_) result) :
   in go (t, tty)
 
 let replace_pattern ((_, p) : Ast.located_expr)
-    ((loc, _) as b : Ast.located_expr) : string * Ast.located_expr =
+    ((loc, _) as b : Ast.located_expr) (icit: icit) : string * Ast.located_expr =
   match p with
   | Ast.Var (Ident i) -> (i, b)
   | _ ->
@@ -394,7 +400,7 @@ let replace_pattern ((_, p) : Ast.located_expr)
     let i = fresh_pattern_var () in
     let match_ =
      let c = (loc, Ast.Var (Ident i)) in
-      let branch = [((loc, p), b)] in
+      let branch = [(((loc, p), icit), b)] in
       (loc, Ast.Match (c, branch))
     in
     (i, match_)
@@ -404,7 +410,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
   let ctx = update_loc loc ctx in
   match (e, force ex) with
   | Ast.Lam ((n, p, icit), b), VPi (n', icit', l, cl) when icit = icit' && n = n' ->
-    let i, b = replace_pattern p b in
+    let i, b = replace_pattern p b icit in
     let@ b =
       check (bind_var ~id:i ~t:l ctx) b (cl $$ VLocal (i, ctx.lvl, Snoc.empty))
     in
@@ -413,12 +419,12 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
      let@ b = check (bind_var ~id:n ~t:l ctx) (loc, t) (cl $$ VLocal (n, ctx.lvl, Snoc.empty)) in
      Lam (n, icit, b)
   | Ast.If (c, t, f), t' ->
-    let t = ((loc, Ast.Const (Bool true)), t) in
-    let f = ((loc, Ast.Const (Bool false)), f) in
+    let t = (((loc, Ast.Const (Bool true)), Exp), t) in
+    let f = (((loc, Ast.Const (Bool false)), Exp), f) in
     let e = (loc, Ast.Match (c, [t; f])) in
     check ctx e t'
   | Ast.Let (p, t, b, n), t' -> (
-    let i, b = replace_pattern p b in
+    let i, b = replace_pattern p b Exp in
     match t with
     | Some t ->
       let* t, _ = is_type ctx t in
@@ -436,9 +442,9 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     let c_id = fresh_scrut_var () in
     let* cs =
       List.map
-        (fun (p, b) ->
+        (fun ((p, icit), b) ->
           let@ p = to_pattern ctx p in
-          (singleton (c_id, p, t), Snoc.empty, b))
+          (singleton (c_id, (p, icit), t), Snoc.empty, b))
         bs
       |> combine_errors
     in
@@ -529,7 +535,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     Log.dbg None (Format.asprintf "%s := %a@." i pp_val t);
     (Local (i, n), t)
   | Ast.Lam ((n, x, icit), t) when n = "_" (* can't infer a named lambda *) ->
-    let x, t = replace_pattern x t in
+    let x, t = replace_pattern x t icit in
     let a = eval ctx.env @@ gen_mv ctx.bds in
     let@ t, b = insert ctx @@ infer (bind_var ~id:x ~t:a ctx) t in
     let b = (ctx.env, quote (ctx.lvl + 1) b) in
@@ -574,7 +580,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     let n = Int.max n n' in
     (Pi (i, icit, l, r), VTypeLit (PUni n))
   | Ast.Let (p, t, b, n) -> (
-    let i, b = replace_pattern p b in
+    let i, b = replace_pattern p b Exp in
     match t with
     | Some t ->
       let* t, _ = is_type ctx t in
@@ -686,8 +692,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     let open Snoc in
     match cs with
     | Lin -> None
-    | Snoc (_, ((_, (_, PCtor _), _) as c))
-    | Snoc (_, ((_, (_, PConst _), _) as c)) -> Some c
+    | Snoc (_, ((_, ((_, PCtor _), _), _) as c))
+    | Snoc (_, ((_, ((_, PConst _), _), _) as c)) -> Some c
     | Snoc (cs, _) -> find_split cs
   in
   let rec done_ ctx target constrs body =
@@ -724,8 +730,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     in
     match constrs with
     | Lin -> check ctx body target
-    | Snoc (cs, (_, (_, PWild), _)) -> done_ ctx target cs body
-    | Snoc (cs, (new_, (_, PVar prev), _)) ->
+    | Snoc (cs, (_, ((_, PWild), _), _)) -> done_ ctx target cs body
+    | Snoc (cs, (new_, ((_, PVar prev), _), _)) ->
        (* rename any occurences of the pattern var with the constr var *)
       let rename = rename_expr prev new_ in
       done_ ctx target cs (rename body)
@@ -733,7 +739,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
   in
   match (prob.clauses, prob.target) with
   | [], _ -> Error.internal "no cases in build_tree."
-  | (_, Snoc.Snoc (_, _), _) :: _, VPi (_, _, l, cl) ->
+  | (_, Snoc.Snoc (_, _), _) :: _, VPi (_, icit, l, cl) ->
     let n = fresh_scrut_var () in
     let r = cl $$ VLocal (n, ctx.lvl, Snoc.empty) in
     let ctx = bind_var ~id:n ~t:l ctx in
@@ -747,11 +753,11 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
       |> combine_errors
     in
     let@ b = build_tree ctx {clauses; target = r} in
-    Lam (n, Exp, b)
+    Lam (n, icit, b)
   | (constrs, Snoc.Lin, c_body) :: _, target -> (
     match find_split constrs with
     | None -> done_ ctx target constrs c_body
-    | Some (sc, (loc, p), _) -> (
+    | Some (sc, ((loc, p), icit), _) -> (
       let ctx = update_loc loc ctx in
       match p with
       | PCtor (c, _) ->
@@ -763,22 +769,23 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             | (constrs, _, _) :: cs -> (
               match Snoc.find_opt (fun (n, _, _) -> n = nm) constrs with
               | None -> go cs nm acc
-              | Some (_, (_, PCtor (c, _)), _) -> go cs nm (c :: acc)
+              | Some (_, ((_, PCtor (c, _)), icit'), _) when icit = icit' -> go cs nm (c :: acc)
               | Some _ -> go cs nm acc)
           in
           go clauses nm []
         in
         (* | S Z ==> | S (pat$1 ~ Nat) *)
         let push_names ctx dcty =
+          (*TODO: figure out to do!!*)
           (* create binding variables over a constructor, using its type sigature *)
           let rec bind_over_pi ctx lvl pi ps acc =
             match (ps, pi) with
-            | p :: ps, VPi (n, _, l, cl) ->
+            | p :: ps, VPi (n, icit, l, cl) ->
               bind_over_pi (bind_var ~id:p ~t:l ctx) (lvl + 1)
                 (cl $$ VLocal (n, lvl, Snoc.empty))
                 ps
-                (acc @> (p, l))
-            | [p], t -> some (bind_var ~id:p ~t ctx, acc @> (p, t))
+                (acc @> (p, l, icit))
+            | [p], t -> some (bind_var ~id:p ~t ctx, acc @> (p, t, Exp))
             | [], _ ->
               (* Z ~ Nat; no constructors so we don't need to bind anything. *)
               some (ctx, acc)
@@ -797,7 +804,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
           let rec go ctx binds cs acc =
             match cs with
             | Snoc.Lin -> some acc
-            | Snoc.Snoc (cs, ((n, (loc, p), _) as constr)) when n = sc -> (
+            | Snoc.Snoc (cs, ((n, ((loc, p), icit'), _) as constr)) when n = sc -> (
               match p with
               | PConst _ | PTypeLit _ -> Error.internal "splittable in splitted"
               | PCtor (c', old) ->
@@ -809,12 +816,12 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                         "Expected a constructor from %s, but got a constructor \
                          from %s."
                         dcon got )
-                else if dc <> c' then
+                else if dc <> c' || icit <> icit' then
                   None
                 else
                   let binds =
                     Snoc.map2
-                      (fun (n, t) p -> (n, p, t))
+                      (fun (n, t, icit) p -> (n, (p, icit), t))
                       binds (Snoc.of_list old)
                   in
                   some (acc <@ cs <@ binds)
@@ -866,7 +873,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               in
               let* t = build_tree ctx {clauses; target = prob.target} in
               let args =
-                Snoc.map (fun (p, _) -> (loc, PVar p)) pts |> Snoc.to_list
+                Snoc.map (fun (p, _, _) -> (loc, PVar p)) pts |> Snoc.to_list
               in
               let b = ((loc, PCtor (d, args)), nf ctx t) in
               build_cases (b :: c_acc) cs
@@ -877,8 +884,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               List.filter
                 (fun (constrs, _, _) ->
                   match Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs with
-                  | Some (_, (_, PWild), _) -> true
-                  | Some (_, (_, PVar _), _) -> true
+                  | Some (_, ((_, PWild), _), _) -> true
+                  | Some (_, ((_, PVar _), _), _) -> true
                   | None -> true
                   | _ -> false)
                 prob.clauses
@@ -928,7 +935,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
             | (constrs, _, _) :: cs -> (
               match Snoc.find_opt (fun (n, _, _) -> n = nm) constrs with
               | None -> go cs nm acc
-              | Some (_, (_, PConst c), _) -> go cs nm (c :: acc)
+              | Some (_, ((_, PConst c), icit'), _) when icit = icit' -> go cs nm (c :: acc)
               | Some _ -> go cs nm acc)
           in
           go clauses nm []
@@ -937,7 +944,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
           let rec go ctx cs acc =
             match cs with
             | Snoc.Lin -> some acc
-            | Snoc.Snoc (cs, ((n, (loc, p), _) as constr)) when n = sc -> (
+            | Snoc.Snoc (cs, ((n, ((loc, p), icit'), _) as constr)) when n = sc -> (
               match p with
               | PTypeLit _ | PCtor _ -> Error.internal "splittable in splitted"
               | PConst c' ->
@@ -946,7 +953,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                     ( Some loc,
                       Printf.sprintf "Expected %s, but got %s"
                         (show_const const) (show_const c') )
-                else if not (const %= c') then
+                else if not (const %= c') || icit <> icit' then
                   None
                 else
                   some (acc <@ cs)
@@ -1044,7 +1051,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               List.filter
                 (fun (constrs, _, _) ->
                   match Snoc.find_opt (fun (sc', _, _) -> sc' = sc) constrs with
-                  | Some (_, (_, PWild), _) | Some (_, (_, PVar _), _) -> true
+                  | Some (_, ((_, PWild), icit'), _) | Some (_, ((_, PVar _), icit'), _) when icit = icit' -> true
                   | _ -> false)
                 prob.clauses
             in
@@ -1074,8 +1081,9 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
 let rec check_definition (ctx : ctx) (loc, (i, args, b, locals)) :
     (located_definition list * ctx) result =
   let* locals, ctx' = check_locals ctx locals in
-  let clause = (Snoc.empty, Snoc.of_rev_list args, b) in
   let* inline, target = get_target i ctx' in
+  let args = insert_implicits args target in
+  let clause = (Snoc.empty, Snoc.of_list args, b) in
   let@ b = build_tree ctx' {clauses = [clause]; target} in
   let t = force target in
   let d = (loc, (quote ctx'.lvl t, i, b)) in
@@ -1088,7 +1096,7 @@ and check_flpm ctx ((loc, (i, args, b, locals)) as def) ds =
       | [] -> Some (failed_acc, acc)
       | ((_, (i', args', _, _)) as d) :: ds
         when i' = i && List.length args = List.length args' ->
-        let* r = List.map2 (equal_pat ctx) args args' |> combine_errors in
+        let* r = List.map2 (fun (l, _) (r, _) -> equal_pat ctx l r) args args' |> combine_errors in
         if List.for_all id r then
           go failed_acc (d :: acc) ds
         else
@@ -1118,8 +1126,9 @@ and check_flpm ctx ((loc, (i, args, b, locals)) as def) ds =
         in
         go [] ctx' @@ List.map (fun (_, (_, _, _, locals)) -> locals) ms'
       in
-      let def = (Snoc.empty, Snoc.of_rev_list args, b) in
       let* inline, target = get_target i ctx' in
+      let args = insert_implicits args target in
+      let def = (Snoc.empty, Snoc.of_rev_list args, b) in
       let@ b = build_tree ctx' {clauses = def :: ms; target} in
       let t = force target in
       let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
@@ -1151,7 +1160,7 @@ and check_locals ctx locals =
     let rec go ctx acc = function
       | [] -> (List.rev acc, ctx)
       | (loc, (i, args, b, locals)) :: ds -> (
-        let args = List.map (to_pattern ctx) args |> combine_errors in
+        let args = List.map (fun (p, icit) -> let@ p = to_pattern ctx p in p, icit) args |> combine_errors in
         match args with
         | None -> go ctx (None :: acc) ds
         | Some args -> (
@@ -1163,9 +1172,7 @@ and check_locals ctx locals =
     let r, ctx =
       List.filter_map
         (function
-          | loc, Ast.Def (i, args, b, locals) ->
-            let args = List.map (fun (_, a, _) -> a) args in
-            Some (loc, (i, args, b, locals))
+          | loc, Ast.Def (i, args, b, locals) -> Some (loc, (i, args, b, locals))
           | _ -> None)
         locals
       |> go ctx []
@@ -1183,7 +1190,21 @@ and get_target i ctx =
         Printf.sprintf "The function '%s' has already been defined." i )
   | Some _ ->
     (* shouldn't occur unless it's an operator. *)
-    err (Some ctx.loc, Printf.sprintf "The identifier '%s' is already in use." i)
+     err (Some ctx.loc, Printf.sprintf "The identifier '%s' is already in use." i)
+
+and insert_implicits args target =
+    let rec go args target i acc =
+    match args, target with
+    | [], _ -> acc
+    | (((loc, _), Exp) :: _) as args, VPi (n, Imp, _, r) ->
+       (* we inject an implicit argument when found *)
+       let imp_arg = ((loc, PVar n), Imp) in
+       go args (r $$ VLocal (n, i, Snoc.empty)) (i + 1) (imp_arg :: acc)
+    | (_, icit) as arg :: args, VPi (n, icit', _, r) when icit = icit' ->
+       go args (r $$ VLocal (n, i, Snoc.empty)) (i + 1) (arg :: acc)
+    | _ -> Error.internal "implicit argument used where explicit was expected??"
+  in
+  go args target 0 []
 
 let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
   let ctx = empty_ctx () in
@@ -1326,7 +1347,7 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let* defs =
       List.map
         (fun (loc, (i, args, b, locals)) ->
-          let@ args = List.map (fun (_, a, _) -> to_pattern ctx a) args |> combine_errors in
+          let@ args = List.map (fun (a, icit) -> let@ a = to_pattern ctx a in a, icit) args |> combine_errors in
           (loc, (i, args, b, locals)))
         defs
       |> combine_errors

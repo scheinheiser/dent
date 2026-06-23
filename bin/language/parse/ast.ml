@@ -14,7 +14,7 @@ and expr =
       * located_expr
       * located_expr (* let p₁ ... pₙ : <optional_ty> = e₁ in e₂ *)
   | Match of
-      located_expr * (located_expr * located_expr) list (* scrutinee + branch list *)
+      located_expr * ((located_expr * icit) * located_expr) list (* scrutinee + branch list *)
   | If of located_expr * located_expr * located_expr
   | Lam of bind * located_expr
   | Const of const
@@ -53,7 +53,7 @@ and definition =
   | Dec of bool * string * located_expr
   | Def of
       string
-      * bind list
+      * (located_expr * icit) list
       * located_expr
       * with_block
 (* identifer, args, body, optional with-block *)
@@ -73,7 +73,7 @@ let rec pp_expr out ((_, e) : located_expr) =
   | Var i -> pp_ident out i
   | Const c -> pp_const out c
   | Tuple (l, r) -> Format.fprintf out "(%a, %a)" pp_expr l pp_expr r
-  | Ap (_, f, arg) -> Format.fprintf out "(%@%a %a)" pp_expr f pp_bind arg
+  | Ap (_, f, arg) -> Format.fprintf out "(%@ %a %a)" pp_expr f pp_bind arg
   | Let (p, ty, v, n) ->
     Format.fprintf out "@[<v>@[<hov>let %a : %a = %a in@]@,%a@]" pp_expr p
       Format.(
@@ -84,8 +84,10 @@ let rec pp_expr out ((_, e) : located_expr) =
       tbranch pp_expr fbranch
   | Lam (arg, body) -> Format.fprintf out "λ %a. %a" pp_bind arg pp_expr body
   | Match (cond, bs) ->
-    let pp_branch out (p, b) =
-      Format.fprintf out "(%a ⇒ %a)" pp_expr p pp_expr b
+   let pp_branch out ((p, icit), b) =
+      match icit with
+      | Exp -> Format.fprintf out "(%a ⇒ %a)" pp_expr p pp_expr b
+      | Imp -> Format.fprintf out "({ %a } → %a)" pp_expr p pp_expr b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_expr cond
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
@@ -148,6 +150,11 @@ let rec pp_definition out ((_, def) : located_definition) =
      then Format.fprintf out "(inline %s)" d
      else Format.fprintf out "(%s)" d
   | Def (f, args, body, with_block) ->
+    let pp_bind out (pat, icit) =
+      match icit with
+      | Exp -> pp_expr out pat
+      | Imp -> Format.fprintf out "{ %a }" pp_expr pat
+    in
     Format.fprintf out "(de@[<v>f %s (%a)@,%a@,%a@])" f
       Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_bind)
       args pp_expr body pp_with_block with_block

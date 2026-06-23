@@ -14,7 +14,7 @@ and expr =
       * located_expr
       * located_expr (* let p₁ ... pₙ : <optional_ty> = e₁ in e₂ *)
   | Match of
-      located_expr * (located_expr * located_expr) list
+      located_expr * ((located_expr * icit) * located_expr) list
   | If of located_expr * located_expr * located_expr
   | Lam of bind * located_expr
   | Const of const
@@ -50,7 +50,7 @@ and definition =
   | Dec of bool * string * located_expr
   | Def of
       string
-      * bind list
+      * (located_expr * icit) list
       * located_expr
       * with_block
 (* identifer, args, optional when-block, body, optional with-block *)

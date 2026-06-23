@@ -752,12 +752,15 @@ module Parser = struct
     let* expr = parse_expr l 0 om in
     let* _ = Lexer.consume l TO "Expected 'to' after match subject." in
     let go l =
-      let* p = parse_pattern l om in
-      let* _ =
-        Lexer.consume l F_ARROW "Expected '=>' or '⇒' after match pattern."
-      in
-      let@ e = parse_expr l 0 om in
-      (p, e)
+      let* (n, ((loc, _) as p), icit) = parse_binding l (fun l -> parse_pattern l om) in
+      if n <> "_"
+      then Lexer.make_err (Some loc, "Patterns cannot be bound to a variable in a match expression.")
+      else (
+        let* _ =
+          Lexer.consume l F_ARROW "Expected '=>' or '⇒' after match pattern."
+        in
+        let@ e = parse_expr l 0 om in
+        ((p, icit), e))
     in
     Lexer.consume_opt l PIPE;
     let@ branches = Lexer.separated_list l ~sep:PIPE go in
@@ -886,6 +889,12 @@ module Parser = struct
     let* s = Lexer.consume_with_pos l DEF "Expected 'def' keyword." in
     let* n = parse_definition_ident l in
     let* args = parse_args l om in
+    let* args =
+      let args, bad = List.partition (fun (n, _, _) -> n = "_") args in
+      if List.length bad <> 0
+      then Lexer.make_err (Some s, "Cannot define a function with a named implicit argument.")
+      else List.map (fun (_, p, icit) -> p, icit) args |> ok
+    in
     let* _ =
       Lexer.consume l ASSIGNMENT "Expected ':=' to seperate a function definition and body."
     in

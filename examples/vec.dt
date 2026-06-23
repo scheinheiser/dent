@@ -4,11 +4,13 @@ data Nat : U =
   | Z : Nat
   | S : Nat → Nat
 
+(*
 data Fin : Nat → U =
-  | FZ : ∀ k. Fin (S k)
-  | FS : ∀ k. Fin k → Fin (S k)
+  | FZ : ∀ (k ~ Nat). Fin (S k)
+  | FS : ∀ (k ~ Nat). Fin k → Fin (S k)
+*)
 
-data Vec : (n: Nat) → (a: U) → U =
+data Vec : (n ~ Nat) → (a ~ U) → U =
   | Nil    : ∀ a. Vec Z a
   | ( @: ) : ∀ (n ~ Nat) a. a → Vec n a → Vec (S n) a
 
@@ -19,7 +21,9 @@ dec append : ∀ (n ~ Nat) a. a → Vec n a → Vec (S n) a
 def append Nil r := r
 def append (l @: ls) r := l @: (append ls r)
 
+(*
 dec index : ∀ (n ~ Nat) a. Fin n → Vec n a → a
 def index FZ (v @: _) := v
 def index (FS n) (_ @: vs) := index n vs
 def index ! Nil (* this case is impossible *)
+*)

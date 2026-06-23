@@ -28,8 +28,9 @@ def chooseType (Right True) := Bool
 def chooseType (Right False) := Float
 *)
 
+inline
 dec id : ∀ a. a → a
-def id := λ {a} x. x
+def id x := x
 
 (*
 dec testMatch : String → Int
