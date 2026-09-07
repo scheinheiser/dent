@@ -14,8 +14,8 @@ let fresh_i =
     incr i;
     !i
 
-(* matching patterns *)
-type located_pattern = Location.t * pattern
+(* the icity is stored with the pattern for convenience *)
+type located_pattern = Location.t * icit * pattern
 
 and pattern =
   | PWild (* _ *)
@@ -95,24 +95,23 @@ let gen_mv bds : tm =
   IMv (mv, bds)
 
 (* pretty printing *)
-let rec pp_pattern out ((_, arg) : located_pattern) =
-  match arg with
-  | PConst c -> pp_const out c
-  | PTypeLit p -> pp_prim out p
-  | PWild -> Format.fprintf out "_"
-  | PAbs -> Format.fprintf out "!"
-  | PTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_pattern l pp_pattern r
-  | PCtor (i, []) -> Format.fprintf out "%s" i
-  | PCtor (i, v) ->
-    Format.fprintf out "(%s %a)" i
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_pattern)
-      v
-  | PVar i -> Format.fprintf out "%s" i
-
 let wrap_icit icit s =
   match icit with
   | Exp -> Printf.sprintf "( %s )" s
   | Imp -> Printf.sprintf "{ %s }" s
+
+let rec pp_pattern ((_, icit, arg) : located_pattern) =
+  let arg =
+    match arg with
+    | PConst c -> Format.asprintf "%a" pp_const c
+    | PTypeLit p -> Format.asprintf "%a" pp_prim p
+    | PWild -> "_"
+    | PAbs -> "!"
+    | PTuple (l, r) -> Printf.sprintf "(%s, %s)" (pp_pattern l) (pp_pattern r)
+    | PCtor (i, []) -> i
+    | PCtor (i, v) -> Printf.sprintf "(%s %s)" i (List.map pp_pattern v |> String.concat " ")
+    | PVar i -> i
+  in wrap_icit icit arg
 
 let rec pp_tm out (tm : tm) =
   match tm with
@@ -130,7 +129,7 @@ let rec pp_tm out (tm : tm) =
     Format.fprintf out "λ@[<v 2> %s. {@,%a@]@,}" (wrap_icit icit arg) pp_tm body
   | Match (c, bs) ->
     let pp_branch out (p, b) =
-      Format.fprintf out "@[(%a) ⇒ %a@]" pp_pattern p pp_tm b
+      Format.fprintf out "@[(%s) ⇒ %a@]" (pp_pattern p) pp_tm b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_tm c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
@@ -158,7 +157,7 @@ let rec pp_val out (v : val_) =
   | VTuple (l, r) -> Format.fprintf out "(%a, %a)" pp_val l pp_val r
   | VMatch (c, _, bs) ->
     let pp_branch out (p, b) =
-      Format.fprintf out "(%a) ⇒ %a" pp_pattern p pp_tm b
+      Format.fprintf out "(%s) ⇒ %a" (pp_pattern p) pp_tm b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_val c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)

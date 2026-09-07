@@ -86,7 +86,7 @@ let rec quote (lvl : lvl) (v : val_) : tm =
   | VMatch (c, env, bs) ->
     let c = quote lvl c in
     let quote_b env (p, b) =
-      let rec build_env env (_, p) l =
+      let rec build_env env (_, _, p) l =
         match p with
         | PWild | PTypeLit _ | PConst _ | PAbs -> (env, l)
         | PVar i -> (env @> VLocal (i, l, Snoc.empty), l + 1)

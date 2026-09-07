@@ -17,9 +17,13 @@ data Vec : (n ~ Nat) → (a ~ U) → U =
 dec empty : ∀ a. Vec Z a
 def empty := Nil
 
-dec append : ∀ (n ~ Nat) a. a → Vec n a → Vec (S n) a
+(*
+dec plus : Nat → Nat → Nat
+
+dec append : ∀ (n ~ Nat) (m ~ Nat) a. Vec m a → Vec n a → Vec (plus m n) a
 def append Nil r := r
 def append (l @: ls) r := l @: (append ls r)
+*)
 
 (*
 dec index : ∀ (n ~ Nat) a. Fin n → Vec n a → a

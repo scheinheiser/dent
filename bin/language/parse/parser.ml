@@ -55,8 +55,9 @@ module Lexer : sig
   val current : t -> Token.t
   val current_pos : t -> Location.t
   val advance : t -> Token.t
-  val peek : t -> Token.t
   val skip : t -> am:int -> unit
+  val peek : t -> Token.t
+  val peek_n : t -> am:int -> Token.t
   val attempt : t -> (t -> 'a result) -> (t -> 'a result) -> 'a result
   val matches : t -> Token.token -> bool
 
@@ -107,12 +108,6 @@ end = struct
       t
     | [] -> (Location.dummy_loc, Token.EOF)
 
-  let peek (stream : t) : Token.t =
-    let previous = stream.tokens in
-    let next = advance stream in
-    stream.tokens <- previous;
-    next
-
   let skip (stream : t) ~am:(n : int) =
     if n < 0 then
       Error.internal "Called Lexer.skip with a negative step."
@@ -123,6 +118,21 @@ end = struct
           aux (t - 1)
       in
       aux n
+
+  let peek (stream : t) : Token.t =
+    let prev = stream.tokens in
+    let next = advance stream in
+    stream.tokens <- prev;
+    next
+
+  let peek_n (stream : t) ~am:(n : int) : Token.t =
+    let prev = stream.tokens in
+    let next =
+      skip stream ~am:(n - 1);
+      advance stream
+    in
+    stream.tokens <- prev;
+    next
 
   let attempt (stream : t) (p1 : t -> 'a result) (p2 : t -> 'a result) :
       'a result =
@@ -237,7 +247,7 @@ module Parser = struct
   let get_bp (t : Token.token) (om : operator_map) : int =
     match t with
     (* the parser will fail without this in cases like `f (g x)` *)
-    | LPAREN | LBRACK | ARROW | TILDE | COMMA | BTICK | FORALL -> 1
+    | LPAREN | LBRACK | LBRACE | ARROW | TILDE | COMMA | BTICK | FORALL -> 1
     | OP op -> (
       match List.assoc_opt op builtin_ops with
       | Some (p, _) -> p
@@ -567,9 +577,13 @@ module Parser = struct
     let* id =
       match Lexer.current l with
       | _, IDENT i ->
-         Lexer.skip ~am:1 l;
-         let@ _ = Lexer.consume l ASSIGNMENT "Expected ':=' to separate identifier and expression in a bind." in
-         i
+         if (Lexer.peek_n ~am:2 l |> snd) <> ASSIGNMENT
+         then ok "_"
+         else (
+           Lexer.skip ~am:1 l;
+           let@ _ = Lexer.consume l ASSIGNMENT "Expected ':=' to separate identifier and expression in a bind." in
+           i
+         )
       | _ -> ok "_"
     in
     let* e = p_func l in
@@ -744,6 +758,7 @@ module Parser = struct
     let* args = parse_args l om in
     let* _ = Lexer.consume l DOT "Expected '.' after lambda arguments." in
     let@ b = parse_expr l 0 om in
+    Format.fprintf Format.std_formatter "lambda body -> %a@." Ast.pp_expr b;
     let loc = Location.combine s (Lexer.current_pos l) in
     List.fold_right (fun n acc -> (loc, Ast.Lam (n, acc))) args b
 

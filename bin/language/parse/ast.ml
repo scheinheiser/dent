@@ -33,7 +33,7 @@ and bind = string * located_expr * icit (* identifier, icit type *)
 
 and update_type =
   | Assign (* { x where y := z } *)
-  | Apply (* { x where y =@ z } - z₁ must be a function. *)
+  | Apply (* { x where y =@ z } - z must be a function. *)
 
 type located_ty_decl = Location.t * ty_decl
 and ty_decl = string * tdecl_type
