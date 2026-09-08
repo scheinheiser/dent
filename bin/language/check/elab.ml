@@ -539,13 +539,11 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
          let@ l, lt = infer ctx l in
          Imp, l, lt
       | "_", Exp ->
-         let@ l, lt = insert ctx @@ infer ctx l in
+         let@ l, lt = insert_aux ctx @@ infer ctx l in
          Exp, l, lt
       | n, _ ->
          let@ l, lt = insert_until_name ctx n @@ infer ctx l in
-         Imp, l, lt
-      (*TODO: maybe use this to implement named arguments??*)
-      (* | _ -> Error.internal "can't have a named explicit argument." *)
+         Imp, l, lt (* can't have a named explicit argument *)
     in
     let* lt, ret =
       match force lt with
@@ -559,10 +557,10 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
         let@ _ = unify ctx (VPi ("x", icit, lt', r')) lt in
         (lt', r')
     in
-    Log.dbg None (Format.asprintf "r := %a@." Ast.pp_expr r);
+    (* Log.dbg None (Format.asprintf "r := %a@." Ast.pp_expr r); *)
     let@ r = check ctx r lt in
-    Log.dbg None
-      (Format.asprintf "ap → %a@.ty → %a@." pp_tm (Ap (b, l, r, icit)) pp_closure ret);
+    (* Log.dbg None *)
+    (*   (Format.asprintf "ap → %a@.ty → %a@." pp_tm (Ap (b, l, r, icit)) pp_closure ret); *)
     (Ap (b, l, r, icit), ret $$ eval ctx.env r)
   | Ast.Pi ((i, l, icit), r) ->
     let* l, n = is_type ctx l in
@@ -653,9 +651,7 @@ and infer_universe ctx = function
     match lookup_top i ctx with
     | None ->
       err (Some ctx.loc, Printf.sprintf "Undefined identifier - '%s'\n" i)
-    | Some (_, t) ->
-      Log.dbg None (Format.asprintf "t := %a@." pp_val t);
-      infer_universe ctx t)
+    | Some (_, t) -> infer_universe ctx t)
   | v ->
     err (Some ctx.loc, Format.asprintf "Expected a Type, but got %a." pp_val v)
 

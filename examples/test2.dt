@@ -1,84 +1,28 @@
 module T
 
-(* ALIAS TESTS - WORKING *)
-(*
 data Boolean : U =
-  | True  : Boolean
-  | False : Boolean
-
-data Wrapper : U =
-  | Left  : Boolean → Wrapper
-  | Right : Boolean → Wrapper
-
-record MyRec =
-  constructor Rec
-  | x : Int
-  | y : Int
-*)
-
-data Nat : U =
-  | Z : Nat
-  | S : Nat → Nat
-
-(*
-dec chooseType : Wrapper → U
-def chooseType (Left True) := String
-def chooseType (Left False) := Int
-def chooseType (Right True) := Bool
-def chooseType (Right False) := Float
-*)
-
-inline
-dec id : ∀ a. a → a
-def id x := x
-
-(*
-dec testMatch : String → Int
-def testMatch "0" := 10
-def testMatch "1" := 20
-def testMatch _ := 30
-
-dec ( - ) : Int → Int → Int
-
-dec make : Int → Nat
-def make 0 := Z
-def make n := S (make (n - 1))
-
-dec max : Nat → Nat → Nat
-def max Z j := j
-def max i Z := i
-def max (S k) (S l) := S (max k l)
-
-dec something : Nat
-def something :=
-  let l := make 10 in
-  let r := make 20 in
-  max l r
-
-dec v : chooseType true
-def v := "hello"
-*)
+  | True : Bool
+  | False : Bool
 
 (* UNION TESTS - kinda working *)
-(*
+
 data Pair : U → U → U =
-  ( × ) : (a, b : U) → a → b → Pair a b
+  ( × ) : ∀ a b. a → b → Pair a b
 
 def test :=
-  let v := ( × ) Int Int 10 10 in
+  let v := 10 × 10 in
   match v to
   | _ × _ ⇒ True
   | _ ⇒ False
 
-dec fst : (a, b : U) → Pair a b → a
-def fst := λ _ _ (x × _). x
+dec fst : ∀ a b. Pair a b → a
+def fst := λ (x × _). x
 
-dec snd : (a, b : U) → Pair a b -> a
-def snd := λ _ _ (_ × y). y
+dec snd : ∀ a b. Pair a b -> b
+def snd := λ (_ × y). y
 
-dec swap : (a, b : U) → Pair a b → Pair b a
-def swap := λ _ _ (x × y). y × x
-*)
+dec swap : ∀ a b. Pair a b → Pair b a
+def swap := λ (x × y). y × x
 
 (* RECORD TESTS *)
 (*
