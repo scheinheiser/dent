@@ -89,6 +89,9 @@ let define_alias ~(id : string) ~(t : val_) ~(ty : tm) (ctx : ctx) =
   {ctx with top = SM.add id {ty = t; def = Alias ty} ctx.top}
 
 let lookup_local (i : string) (ctx : ctx) : (int * val_) option =
+  (* print_endline "in lookup_local."; *)
+  (* Snoc.iter (fun (i, t) -> Format.fprintf Format.std_formatter "%s => %a@." i pp_val t) ctx.tys; *)
+  (* print_endline "end lookup_local."; *)
   let r =
     Snoc.find_mapi (fun n (x, t) -> if x = i then Some (n, t) else None) ctx.tys
   in

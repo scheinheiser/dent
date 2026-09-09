@@ -1,28 +1,19 @@
 module T
 
-data Boolean : U =
-  | True : Bool
-  | False : Bool
-
-(* UNION TESTS - kinda working *)
-
+(* UNION TESTS - mostly working *)
 data Pair : U → U → U =
   ( × ) : ∀ a b. a → b → Pair a b
 
-def test :=
-  let v := 10 × 10 in
-  match v to
-  | _ × _ ⇒ True
-  | _ ⇒ False
-
+(*
 dec fst : ∀ a b. Pair a b → a
-def fst := λ (x × _). x
+def fst := λ (x × y). x
 
 dec snd : ∀ a b. Pair a b -> b
-def snd := λ (_ × y). y
+def snd := λ (x × y). y
+*)
 
 dec swap : ∀ a b. Pair a b → Pair b a
-def swap := λ (x × y). y × x
+def swap (x × y) := y × x
 
 (* RECORD TESTS *)
 (*

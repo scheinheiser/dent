@@ -83,8 +83,7 @@ let rec map2 f l r =
   | Snoc (ls, l), Snoc (rs, r) -> map2 f ls rs @> f l r
   | _ -> failwith "Snoc.map2"
 
-let rec fold_left f acc s =
-  match s with
+let rec fold_left f acc = function
   | Lin -> acc
   | Snoc (r, v) -> f (fold_left f acc r) v
 
@@ -92,6 +91,10 @@ let rec fold_right f s acc =
   match s with
   | Lin -> acc
   | Snoc (r, v) -> fold_right f r (f v acc)
+
+let rec iter f = function
+  | Lin -> ()
+  | Snoc (r, v) -> f v; iter f r
 
 let rec find_opt f = function
   | Lin -> None

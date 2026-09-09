@@ -444,7 +444,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     Let (c_id, quote 0 t, c, ctree)
   | e, ex ->
     let* e, t = insert ctx @@ infer ctx (loc, e) in
-    let@ _ = unify ctx t ex in
+    let@ _ = unify ctx ex t in
     e
 
 and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
@@ -497,7 +497,8 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
     | Some (Def (true, b), t) -> some (b, t) (* an inlined function *)
     | Some (_, t) -> some (Top i, t)
     | None ->
-      let@ n, t = lookup_local i ctx in
+       let@ n, t = lookup_local i ctx in
+       (* Format.fprintf Format.std_formatter "looked up %s, ty is %a@." i pp_val t; *)
       (Local (i, n), t))
   | Ast.Var (AccessIdent (base, is)) ->
     let rec final_field_ty r_fields = function
@@ -763,7 +764,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         in
         (* | S Z ==> | S (pat$1 ~ Nat) *)
         let push_names ctx dcty =
-          (*TODO: figure out to do!!*)
           (* create binding variables over a constructor, using its type sigature *)
           let rec bind_over_pi ctx lvl pi ps acc =
             match (ps, pi) with
@@ -783,7 +783,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                    constructor." )
           in
           let ps = List.init (arity dcty) (fun _ -> fresh_pattern_var ()) in
-          let@ ctx, pts = bind_over_pi ctx ctx.lvl dcty ps Snoc.empty in
+          let@ ctx, pts = bind_over_pi ctx 0 dcty ps Snoc.empty in
           (ctx, pts)
         in
         (* turn a constructor constraint into a set of constraints on its patterns. *)
@@ -807,7 +807,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                   None
                 else
                   let binds =
-                    Log.dbg None (Printf.sprintf "icits of binds := %s\n" (Snoc.to_list binds |> List.map (fun (_, _, icit) -> show_icit icit) |> String.concat ", "));
                     let rec go binds old acc =
                       let open Snoc in
                       match binds, old with
@@ -817,13 +816,9 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                       | Snoc (binds, (_, _, Imp)), (Snoc (_, (_, Exp, _)) as rest) ->
                          go binds rest acc
                       | _ ->
-                         Log.dbg None (Printf.sprintf "in constructor %s, binds, args, acc := %d, %d, %d\n" dc (Snoc.length binds) (Snoc.length old) (Snoc.length acc));
                          Error.internal "implicit argument where explicit was expected."
                     in
                     go (Snoc.rev binds) (Snoc.of_list old) Lin
-                    (* Snoc.map2 *)
-                    (*   (fun (n, t, icit) p -> (n, (p, icit), t)) *)
-                    (*   binds (Snoc.of_list old) *)
                   in
                   some (acc <@ cs <@ binds)
               | _ -> some ((acc <@ cs) @> constr))
@@ -876,7 +871,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               let args =
                 Snoc.map (fun (p, _, icit) -> (loc, icit, PVar p)) pts |> Snoc.to_list
               in
-             let b = ((loc, icit, PCtor (d, args)), nf ctx t) in
+              let b = (loc, icit, PCtor (d, args)), nf ctx t in
               build_cases (b :: c_acc) cs
           in
           let build_default_case ctx missed =
@@ -1213,22 +1208,33 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     (*TODO: just use let* and let@ rather than trying to catch every error. *)
     let rec check_decls ctx acc ts =
       let pi_to_lam cons pi =
-        (* given ( × ) ~ (a : U) → (b: U) → Pair a b *)
-        let id_stack =
-          let rec go pi acc =
+        (* given ( × ) ~ {a, b ~ U} → a → b → Pair a b *)
+        let id_stack, id_map, top =
+          let rec go pi st ids acc =
             match pi with
-            | Pi (n, icit, _, r) -> go r (acc @> (n, icit))
-            | _ -> acc
+            | Pi (n, icit, _, r) ->
+               let ids, acc =
+                 if SM.mem n ids
+                 then ids, acc
+                 else (
+                   let acc = acc + 1 in
+                   let ids = SM.add n acc ids in
+                   ids, acc
+                 )
+               in
+               go r (st @> (n, icit)) ids acc
+            | _ -> st, ids, acc
           in
-          go pi Snoc.empty
+          go pi Snoc.empty SM.empty 0
         in
-        (* ( × ) a b ⇒ ( × ) 1 0 *)
-        let ap, _ =
+        (* a ⇒ 1; b ⇒ 0 *)
+        let ap =
           Snoc.fold_left
-            (fun (acc, n) (i, icit) -> (Ap (0, acc, Local (i, n), icit), n + 1))
-            (Top cons, 0) id_stack
+            (fun acc (i, icit) ->
+              let n = top - (SM.find i id_map) in
+              Ap (0, acc, Local (i, n), icit))
+            (Top cons) id_stack
         in
-        (* ( × ) 1 0 ⇒ λ λ. ( × ) 1 0 *)
         let v = Snoc.fold_right (fun (i, icit) acc -> Lam (i, icit, acc)) id_stack ap in
         Log.dbg None (Format.asprintf "Turned pi into %a@." pp_tm v);
         v

@@ -129,7 +129,7 @@ let rec pp_tm out (tm : tm) =
     Format.fprintf out "λ@[<v 2> %s. {@,%a@]@,}" (wrap_icit icit arg) pp_tm body
   | Match (c, bs) ->
     let pp_branch out (p, b) =
-      Format.fprintf out "@[(%s) ⇒ %a@]" (pp_pattern p) pp_tm b
+      Format.fprintf out "@[(%s) ⇒@,  %a@]" (pp_pattern p) pp_tm b
     in
     Format.fprintf out "ma@[<v>tch (%a)@,%a@]" pp_tm c
       Format.(pp_print_list ~pp_sep:pp_print_cut pp_branch)
@@ -165,7 +165,7 @@ let rec pp_val out (v : val_) =
   | VPi (n, icit, l, cl) ->
     let l = Format.asprintf "%s : %a" n pp_val l in
     Format.fprintf out "%s -> %a" (wrap_icit icit l) pp_closure cl
-  | VLocal (i, _, sp) -> Format.fprintf out "%s (%s)" i (Snoc.map fst sp |> pp_sp pp_val)
+  | VLocal (i, n, sp) -> Format.fprintf out "%s/%d (%s)" i n (Snoc.map fst sp |> pp_sp pp_val)
   | VMeta (m, sp) -> Format.fprintf out "?meta%d (%s)" m (Snoc.map fst sp |> pp_sp pp_val)
 
 and pp_sp pp_func s =
