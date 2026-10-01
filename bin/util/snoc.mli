@@ -8,6 +8,7 @@ val singleton : 'a -> 'a t
 val length : 'a t -> int
 val hd : 'a t -> 'a
 val nth : 'a t -> int -> 'a
+val nth_opt : 'a t -> int -> 'a option
 
 (* append and prepend a value to the list respectively *)
 val ( @> ) : 'a t -> 'a -> 'a t
@@ -25,6 +26,9 @@ val fold_left : ('acc -> 'a -> 'acc) -> 'acc -> 'a t -> 'acc
 val fold_right : ('a -> 'acc -> 'acc) -> 'a t -> 'acc -> 'acc
 val iter : ('a -> unit) -> 'a t -> unit
 val find_opt : ('a -> bool) -> 'a t -> 'a option
+
+(* snoc list manipulations *)
+val change_at : int -> 'a t -> 'a -> 'a t
 
 (* find_map that carries an index for each element in list *)
 val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option

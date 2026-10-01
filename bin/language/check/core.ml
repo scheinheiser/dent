@@ -177,8 +177,9 @@ and pp_sp pp_func s =
   in
   go s
 
-and pp_closure out ((env, tm) : closure) =
-  Format.fprintf out "[ @[<v>%s ] -> @,%a@]" (pp_sp pp_val env) pp_tm tm
+and pp_closure out ((_, tm) : closure) =
+  (* Format.fprintf out "[ @[<v>%s ] -> @,%a@]" (pp_sp pp_val env) pp_tm tm *)
+  Format.fprintf out "@[@,%a@]" pp_tm tm
 
 let rec pp_ty_decl out ((_, (i, t)) : located_ty_decl) =
   Format.fprintf out "(ty@[<v>pe %s@,%a@])" i pp_tdecl_type t

@@ -758,7 +758,6 @@ module Parser = struct
     let* args = parse_args l om in
     let* _ = Lexer.consume l DOT "Expected '.' after lambda arguments." in
     let@ b = parse_expr l 0 om in
-    Format.fprintf Format.std_formatter "lambda body -> %a@." Ast.pp_expr b;
     let loc = Location.combine s (Lexer.current_pos l) in
     List.fold_right (fun n acc -> (loc, Ast.Lam (n, acc))) args b
 

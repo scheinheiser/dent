@@ -25,6 +25,14 @@ let nth s n =
   in
   go s n
 
+let nth_opt s n =
+  let rec go s n =
+    match s with
+    | Lin -> None
+    | Snoc (xs, x) -> if n = 0 then Some x else go xs (n - 1)
+  in
+  go s n
+
 let rec append s v =
   match s with
   | Lin -> Snoc (Lin, v)
@@ -99,6 +107,15 @@ let rec iter f = function
 let rec find_opt f = function
   | Lin -> None
   | Snoc (xs, x) -> if f x then Some x else find_opt f xs
+
+(* NOTE: has no effect on the list if the index is out of bounds. *)
+let change_at idx l v =
+  let rec go idx l v acc =
+    match l with
+    | Lin -> rev acc
+    | Snoc (r, v') -> if idx = 0 then go (idx - 1) r v (acc @> v) else go (idx - 1) r v (acc @> v')
+  in
+  go idx l v Lin
 
 let find_mapi f s =
   let rec go f s n =

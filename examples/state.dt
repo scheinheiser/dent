@@ -1,5 +1,8 @@
 module State
 
+data Pair : U → U → U =
+  ( × ) : ∀ A B. A → B → Pair A B
+
 record State s a where
   constructor MkState
   | runState : s → (a × s)

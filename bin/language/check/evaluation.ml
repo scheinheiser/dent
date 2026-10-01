@@ -6,11 +6,7 @@ let ( @> ) = Snoc.( @> )
 (* term → val *)
 let rec eval (env : env) (tm : tm) : val_ =
   match tm with
-  | Local (_, i) ->
-    (* Log.dbg None *)
-    (*   (Format.asprintf "@[<v>indexing %s with %d into env.@,env ↦ [ %s ]@]" n i *)
-    (*      (pp_sp pp_val env)); *)
-    Snoc.nth env i
+  | Local (_, i) -> Snoc.nth env i
   | TypeLit p -> VTypeLit p
   | Const c -> VConst c
   | Top i -> VTop (i, Snoc.empty)

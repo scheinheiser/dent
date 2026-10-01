@@ -118,7 +118,10 @@ let rec pp_expr out ((_, e) : located_expr) =
 and pp_bind out ((n, e, i) : bind) =
   match i with
   | Imp -> Format.fprintf out "{%s := %a}" n pp_expr e
-  | Exp -> pp_expr out e
+  | Exp ->
+     if n <> "_"
+     then Format.fprintf out "(%s := %a)" n pp_expr e
+     else pp_expr out e
 
 let rec pp_ty_decl out ((_, (i, t)) : located_ty_decl) =
   match t with

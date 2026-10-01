@@ -27,12 +27,13 @@ and def =
   | RCon of string * (string * tm) list
   | DCon of (string * tm)
     (* type constructor name, the function that constructs the value. *)
-  | TCon of string list (* a list of all of the data constructors *)
+  | TCon of (string list * tm) (* a list of all of the data constructors, the function that constructs the type. *)
   | Alias of tm
   | Axiom of bool
 
 (* compute the normal form of a term *)
 let nf ctx v = Evaluation.eval ctx.env v |> Evaluation.quote ctx.lvl
+let nf' ctx v = Evaluation.quote ctx.lvl v |> Evaluation.eval ctx.env
 
 let empty_ctx () =
   {
@@ -77,9 +78,9 @@ let define_func ~(id : string) ~(v : bool * tm) ~(t : val_) (ctx : ctx) =
 let define_dcon ~(id : string) ~(t : val_) ~(v : string * tm) (ctx : ctx) =
   {ctx with top = SM.add id {ty = t; def = DCon v} ctx.top}
 
-let define_tcon ~(id : string) ~(t : val_) ~(constrs : string list) (ctx : ctx)
+let define_tcon ~(id : string) ~(t : val_) ~(v : string list * tm) (ctx : ctx)
     =
-  {ctx with top = SM.add id {ty = t; def = TCon constrs} ctx.top}
+  {ctx with top = SM.add id {ty = t; def = TCon v} ctx.top}
 
 let define_rcon ~(id : string) ~(t : val_) ~(tcon : string)
     ~(fields : (string * tm) list) (ctx : ctx) =
@@ -89,9 +90,6 @@ let define_alias ~(id : string) ~(t : val_) ~(ty : tm) (ctx : ctx) =
   {ctx with top = SM.add id {ty = t; def = Alias ty} ctx.top}
 
 let lookup_local (i : string) (ctx : ctx) : (int * val_) option =
-  (* print_endline "in lookup_local."; *)
-  (* Snoc.iter (fun (i, t) -> Format.fprintf Format.std_formatter "%s => %a@." i pp_val t) ctx.tys; *)
-  (* print_endline "end lookup_local."; *)
   let r =
     Snoc.find_mapi (fun n (x, t) -> if x = i then Some (n, t) else None) ctx.tys
   in
@@ -104,9 +102,9 @@ let lookup_top (i : string) (ctx : ctx) : (def * val_) option =
   | Some top -> Some (top.def, top.ty)
   | None -> None
 
-let lookup_tcon (i : string) (ctx : ctx) : (string list * val_) option =
+let lookup_tcon (i : string) (ctx : ctx) : ((string list * tm) * val_) option =
   match lookup_top i ctx with
-  | Some (TCon constrs, ty) -> Some (constrs, ty)
+  | Some (TCon v, ty) -> Some (v, ty)
   | _ ->
     err (Some ctx.loc, Printf.sprintf "Undefined type constructor - '%s'." i)
 

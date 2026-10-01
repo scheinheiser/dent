@@ -23,16 +23,16 @@ def const := λ x _. id x
 
 (* some proof-y stuff *)
 
-data ( ≡ ) : (a ~ U) → a → U =
-  Refl : {a ~ U} → a ≡ a
+data ( ≡ ) : ∀ A. A → A → U =
+  Refl : ∀ A. {a ~ A} → a ≡ a
 
 (*
 dec one_plus_one : 1 + 1 ≡ 2
 def one_plus_one := Refl
 *)
 
-dec sym : ∀ a b. a ≡ b → b ≡ a
-def sym Refl := Refl
+dec comm : ∀ A. {a, b ~ A} → a ≡ b → b ≡ a
+def comm Refl := Refl
 
-dec trans : ∀ a b c. a ≡ b → b ≡ c → a ≡ c
+dec trans : ∀ A. {a, b, c ~ A} → a ≡ b → b ≡ c → a ≡ c
 def trans Refl x := x

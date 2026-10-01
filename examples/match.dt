@@ -1,0 +1,13 @@
+module Match
+
+data Boolean : U =
+  | True  : Boolean
+  | False : Boolean
+
+dec chooseType : Boolean → U
+def chooseType True  := String
+def chooseType False := Int
+
+(* since i haven't implemented proper evaluation of match cases, this example cannot compile. *)
+dec testFn : chooseType False
+def testFn := 20
