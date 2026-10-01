@@ -908,68 +908,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
              | _ -> update_ctx ctx subs (* TODO: check that there are no subs between this res through subst uni *))
           | _ :: subs -> update_ctx ctx subs
         in
-        let rec force_case_sub ctx prob subs =
-          let is_split cs =
-            let cs = List.map (fun (constrs, _, _) -> find_split constrs) cs in
-            match combine_errors cs with
-            | None | Some [] -> false
-            | _ -> true
-          in
-          match subs with
-          | [] -> build_tree ctx prob
-          | (n, VLocal (_, n', Snoc.Lin)) :: subs ->
-             let clauses =
-               let change_idx ix ix' ((n, pat, ty) as constr) =
-                 if ix = n
-                 then ix', pat, ty
-                 else constr
-               in
-               List.map
-                 (fun (cs, ps, b) ->
-                   Snoc.map (change_idx n n') cs, ps, b)
-                 prob.clauses
-             in
-             force_case_sub ctx { clauses; target = prob.target } subs
-          | (n, VTop (i, sp)) :: subs -> (
-            let matched_cons = clauses_matched_on prob.clauses n in
-            let splitted = is_split prob.clauses in
-            if not @@ (List.mem i matched_cons) || splitted
-            then force_case_sub ctx prob subs
-            else (
-              match lookup_top i ctx with
-              | None -> err (Some ctx.loc, Printf.sprintf "Undefined identifier - %s." i)
-              | Some (DCon _, ty) ->
-                 let* ctx, pts, _ = push_names ctx ty in
-                 (* TODO: check that pts matches sp length *)
-                 let subs' =
-                   let open Snoc in
-                   let rec aux n sp acc =
-                     match sp with
-                     | Lin -> acc
-                     | Snoc (r, (v, _)) -> aux (n + 1) r ((n, v) :: acc)
-                    in aux (ctx.lvl - length sp) sp []
-                 in
-                 let* ctx = update_ctx ctx subs' in
-                 let* clauses =
-                   List.filter_map
-                     (fun (c, ps, b) ->
-                       let@ c = rewrite_constr ctx pts c i in
-                       Some (c, ps, b))
-                    prob.clauses
-                   |> combine_errors
-                 in
-                 let* br_body = force_case_sub ctx { clauses; target = prob.target } (subs @ subs') in
-                 let sc = Local (fresh_scrut_var (), to_ix ctx.lvl n) in
-                 let branch =
-                   let args =
-                     Snoc.map (fun (p, _, icit) -> let p = "pat$" ^ (string_of_int p) in (loc, icit, PVar p)) pts |> Snoc.to_list
-                   in
-                   [ (loc, icit, PCtor (i, args)), nf ctx br_body ]
-                 in
-                 some @@ Match (sc, branch)
-              | _ -> force_case_sub ctx prob subs))
-            | _ :: subs -> force_case_sub ctx prob subs
-        in
         let* ds = collect_dcons ctx dcon in
         let* hit, missed =
           let matched_on, missed =
@@ -1014,7 +952,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                  prob.clauses
                 |> combine_errors
               in
-              let* t = force_case_sub ctx {clauses; target = prob.target} subs in
+              let* t = build_tree ctx {clauses; target = prob.target} in
               let args =
                 Snoc.map (fun (p, _, icit) -> let p = "pat$" ^ (string_of_int p) in (loc, icit, PVar p)) pts |> Snoc.to_list
               in
