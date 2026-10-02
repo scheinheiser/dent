@@ -4,18 +4,9 @@ data Nat : U =
   | Z : Nat
   | S : Nat → Nat
 
-dec zero : Nat
-def zero := Z
-
-dec one : Nat
-def one := S Z
-
 dec plus : Nat → Nat → Nat
 def plus n Z := n
 def plus n (S n') := S (n `plus` n')
-
-dec ( + ) : Nat → Nat → Nat
-def ( + ) := plus
 
 dec sub : Nat → Nat → Nat
 def sub Z n := Z
@@ -25,7 +16,3 @@ def sub (S n) (S n') := n `sub` n'
 dec mul : Nat → Nat → Nat
 def mul n Z := Z
 def mul n (S n') := n `plus` (n `mul` n')
-
-dec ofInt : Nat → Nat
-def ofInt Z := zero
-def ofInt (S n) := one + ofInt n

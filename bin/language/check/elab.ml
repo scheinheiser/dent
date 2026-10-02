@@ -18,11 +18,15 @@ let fresh_bind_var () : string = "b$" ^ (fresh_i () |> string_of_int)
 let fresh_scrut_var () : string = "c_id$" ^ (fresh_i () |> string_of_int)
 
 (* mutable list that holds all of the holes found in source code *)
-let holes : (Location.t * (val_ * val_)) list ref = ref []
+type hole_info =
+  | Actual
+  | Placeholder
+
+let holes : (Location.t * hole_info * (val_ * val_)) list ref = ref []
 let add_hole v = holes := v :: !holes
 
 let fmt_holes () =
-  let pp_hole out (loc, v) =
+  let pp_hole out (loc, _, v) =
     let pp_t out (b, t) =
       match force b with
       | VMeta _ -> (
@@ -95,8 +99,7 @@ let combine_errors = Base.Option.all
 let combine_errors_unit = Base.Option.all_unit
 
 (*
-   partial renaming. the solution to a problem like ?α spine =? t is ?α = λ x₁
-   ... xₙ . t, where the solution has a context Δ and the spine has a context Γ.
+   partial renaming. the solution to a problem like ?α spine =? t is ?α = λ x₁ ... xₙ . t, where the solution has a context Δ and the spine has a context Γ.
    we need to rename spine locals so that they're valid within the Δ context,
    which is where partial renaming comes in.
 *)
@@ -493,11 +496,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     let@ ctree = build_tree ctx {clauses = cs; target = t'} in
     Let (c_id, quote 0 t, c, ctree)
   | e, ex ->
-    let* e, t = infer ctx (loc, e) in
-    (* Format.fprintf Format.std_formatter "before@.t = %a@.e = %a@.@." pp_val t pp_tm e; *)
-    let* e, t = insert ctx @@ some (e, t) in
-    (* Format.fprintf Format.std_formatter "after@.t = %a@.e = %a@.@." pp_val t pp_tm e; *)
-    (* Format.fprintf Format.std_formatter "comparing:@.  %a@.  %a@.@." pp_val ex pp_val t; *)
+    let* e, t = insert ctx @@ infer ctx (loc, e) in
     let@ _ = unify ctx Normal ~ex ~got:t in
     e
 
@@ -522,7 +521,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
   | Ast.Hole ->
     let t = eval ctx.env @@ gen_mv ctx.bds in
     let a = gen_mv ctx.bds in
-    add_hole (loc, (eval ctx.env a, t));
+    add_hole (loc, Actual, (eval ctx.env a, t));
     some (a, t)
   | Ast.Annot (e, t) ->
     let* t, _ = is_type ctx t in
@@ -610,10 +609,7 @@ and infer (ctx : ctx) ((loc, e) : Ast.located_expr) : (tm * val_) result =
         let@ _ = unify ctx Normal ~ex:(VPi ("x", icit, lt', r')) ~got:lt in
         (lt', r')
     in
-    (* Log.dbg None (Format.asprintf "r := %a@." Ast.pp_expr r); *)
     let@ r = check ctx r lt in
-    (* Log.dbg None *)
-    (*   (Format.asprintf "ap → %a@.ty → %a@." pp_tm (Ap (b, l, r, icit)) pp_closure ret); *)
     (Ap (b, l, r, icit), ret $$ eval ctx.env r)
   | Ast.Pi ((i, l, icit), r) ->
     let* l, n = is_type ctx l in
@@ -770,12 +766,14 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     in
     match constrs with
     | Lin ->
+       (* forces any substitutions to be made before typechecking *)
        let target = quote ctx.lvl target |> eval ctx.env in
        check ctx body target
     | Snoc (cs, (_, (_, _, PWild), _)) -> done_ ctx target cs body
     | Snoc (cs, (new_, (_, _, PVar prev), _)) ->
       (* rename any occurences of the pattern var with the constr var *)
       let new_ = "c_id$" ^ (string_of_int new_) in
+      Printf.printf "new_ = %s\n\n" new_;
       done_ ctx target cs @@ rename_expr prev new_ body
     | _ -> Error.internal "splittable constraint in done_."
   in
@@ -826,8 +824,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               bind_over_pi (bind_var ~id:p ~t:l ctx) (lvl + 1)
                 (cl $$ VLocal (n, lvl, Snoc.empty))
                 ps
-                (acc @> (ctx.lvl, l, icit))
-            | [p], t -> some (bind_var ~id:p ~t ctx, acc @> (ctx.lvl, t, Exp), t)
+                (acc @> (lvl, l, icit))
+            | [p], t -> some (bind_var ~id:p ~t ctx, acc @> (lvl, t, Exp), t)
             | [], t ->
               (* Z ~ Nat; no constructors so we don't need to bind anything. *)
               some (ctx, acc, t)
@@ -980,7 +978,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                      Missing cases for the constructor(s): %s@.@]"
                     (String.concat ", " missed) );
               let hole = gen_mv ctx.bds in
-              add_hole (loc, (eval Snoc.empty hole, prob.target));
+              add_hole (loc, Placeholder, (eval ctx.env hole, prob.target));
               some ((loc, icit, PWild), hole)
             | _ ->
               let@ tree =
@@ -1448,6 +1446,7 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     go ctx [] defs |> combine_errors
   in
   (* TODO: halt further compilation if a function isn't defined (but has a type signature). *)
+  holes := List.filter (fun (_, hi, _) -> hi <> Placeholder) !holes;
   match !holes with
   | [] -> some (n, mods, tdecls, List.rev defs |> List.flatten)
   | _ -> err (None, fmt_holes ())
