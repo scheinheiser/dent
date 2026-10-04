@@ -17,8 +17,14 @@ data Vec : (n ~ Nat) → (a ~ U) → U =
 dec empty : ∀ a. Vec Z a
 def empty := Nil
 
-dec test : Vec (S (S Z)) Int
+dec something : Nat
+def something := S (S (S (S (S Z))))
+
+dec test : Vec something Int
 def test := 4 @: 3 @: 2 @: 1 @: Nil
+
+dec len : ∀ (n ~ Nat) A. Vec n A → Nat
+def len {n} _ := n
 
 (*
 dec plus : Nat → Nat → Nat

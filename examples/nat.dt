@@ -6,7 +6,7 @@ data Nat : U =
 
 dec plus : Nat → Nat → Nat
 def plus n Z := n
-def plus n (S n') := S (n `plus` n')
+def plus n (S m) := S (n `plus` m)
 
 dec sub : Nat → Nat → Nat
 def sub Z n := Z

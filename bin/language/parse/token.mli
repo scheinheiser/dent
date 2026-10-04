@@ -15,7 +15,6 @@ and token =
   | TY_BOOL
   | UNIT
   | TY_UNIT
-  | TY_ATOM
   | IDENT of string
   | UPPER_IDENT of string
   | DOT_SEP_IDENT of string * string list

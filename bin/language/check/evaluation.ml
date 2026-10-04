@@ -50,14 +50,7 @@ and v_ap_bds env bds m =
     match bd with
     | B -> v_ap (v_ap_bds env bds m) e Exp
     | D -> v_ap_bds env bds m)
-  | _ ->
-     let print_bd = function
-       | B -> "B"
-       | D -> "D"
-     in
-     let bds' = Snoc.map print_bd bds |> Snoc.to_list |> String.concat ", " in
-     Printf.printf "env l = %d\nbds l = %d\nbds = %s\n\n" (Snoc.length env) (Snoc.length bds) bds';
-     Error.internal "Mismatched env/bds list."
+  | _ -> Error.internal "Mismatched env/bds list."
 
 (* compute the arity of a function through its type *)
 let arity pi =

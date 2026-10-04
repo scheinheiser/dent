@@ -15,7 +15,6 @@ and token =
   | TY_BOOL
   | UNIT
   | TY_UNIT
-  | TY_ATOM
   | IDENT of string
   | UPPER_IDENT of string
   | DOT_SEP_IDENT of string * string list
@@ -86,7 +85,6 @@ let show (t : token) : string =
   | TY_BOOL -> sprintf "TY_BOOL"
   | UNIT -> "UNIT"
   | TY_UNIT -> "TY_UNIT"
-  | TY_ATOM -> "TY_ATOM"
   | IDENT i -> sprintf "IDENT %s" i
   | UPPER_IDENT i -> sprintf "UPPER_IDENT %s" i
   | DOT_SEP_IDENT (i, is) ->

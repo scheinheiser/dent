@@ -36,7 +36,6 @@ let keywords =
     ("String", TY_STRING);
     ("Bool", TY_BOOL);
     ("Unit", TY_UNIT);
-    ("Atom", TY_ATOM);
     ("with", WITH);
     ("without", WITHOUT);
     ("true", BOOL true);
