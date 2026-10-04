@@ -63,7 +63,7 @@ let pp_u_mode out = function
   | Subst -> Format.fprintf out "Substitution"
 
 (* case analysis *)
-type constr = int * located_pattern * val_ (* m /? pat, ty *)
+type constr = string * located_pattern * val_ (* m /? pat, ty *)
 
 and clause =
   constr Snoc.t * located_pattern Snoc.t * Ast.located_expr
@@ -75,7 +75,7 @@ and problem = {
 }
 
 (* for debugging *)
-let pp_constr out (i, pat, t) = Format.fprintf out "%d /? %s ~ %a" i (pp_pattern pat) pp_val t
+let pp_constr out (i, pat, t) = Format.fprintf out "%s /? %s ~ %a" i (pp_pattern pat) pp_val t
 
 let pp_clause out (cs, ps, _, b) =
   let cs, ps = (Snoc.to_list cs, Snoc.to_list ps) in
@@ -250,10 +250,10 @@ let rec unify (ctx : ctx) (mode: u_mode) ~(ex : val_) ~(got : val_) : u_res resu
           bs bs'
         |> combine_errors
       in r @ List.flatten r'
-    | VLocal (_, ri, sp), VLocal (_, ri', sp') when ri = ri' -> unify_sp ctx mode sp sp'
     | VMeta (mv, sp), VMeta (mv', sp') when mv = mv' -> unify_sp ctx Normal sp sp'
     | VMeta (mv, sp), t | t, VMeta (mv, sp) ->
        let@ _ = solve ctx.loc ctx.lvl mv sp t in []
+    | VLocal (_, ri, sp), VLocal (_, ri', sp') when ri = ri' -> unify_sp ctx mode sp sp'
     | VTop (i, sp), VTop (i', sp') when i = i' -> unify_sp ctx mode sp sp'
     | VTop (i, sp), t | t, VTop (i, sp) -> ( (* TODO: possibly split into two cases so that error messages can be more helpful? *)
       match lookup_top i ctx with
@@ -490,7 +490,7 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
       List.map
         (fun ((p, icit), b) ->
           let@ p = to_pattern ctx p icit in
-          (singleton (ctx.lvl, p, t), Snoc.empty, b))
+          (singleton (c_id, p, t), Snoc.empty, b))
         bs
       |> combine_errors
     in
@@ -499,7 +499,6 @@ let rec check (ctx : ctx) ((loc, e) : Ast.located_expr) (ex : val_) : tm result
     Let (c_id, quote 0 t, c, ctree)
   | e, ex ->
     let* e, t = insert ctx @@ infer ctx (loc, e) in
-    Format.fprintf Format.std_formatter "e := %a@.t := %a@.ex := %a@.@." pp_tm e pp_val t pp_val ex;
     let@ _ = unify ctx Normal ~ex ~got:t in
     e
 
@@ -775,15 +774,14 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
     | Snoc (cs, (_, (_, _, PWild), _)) -> done_ ctx target cs body
     | Snoc (cs, (new_, (_, _, PVar prev), _)) ->
       (* rename any occurences of the pattern var with the constr var *)
-      let new_ = "c_id$" ^ (string_of_int new_) in
       done_ ctx target cs @@ rename_expr prev new_ body
     | _ -> Error.internal "splittable constraint in done_."
   in
   match (prob.clauses, prob.target) with
   | [], _ -> Error.internal "no cases in build_tree."
-  | (_, Snoc.Snoc (_, _), _) :: _, VPi (_, icit, l, cl) ->
-    let idx = ctx.lvl in
-    let n = "c_id$" ^ (string_of_int idx) in
+  | (_, Snoc.Snoc (_, p), _) :: _, VPi (_, icit, l, cl) ->
+    let n = fresh_scrut_var () in
+    Format.fprintf Format.std_formatter "scrut var -> %s@.working on pattern -> %s@.@." n (pp_pattern p);
     let r = cl $$ VLocal (n, ctx.lvl, Snoc.empty) in
     let ctx = bind_var ~id:n ~t:l ctx in
     let* clauses =
@@ -791,7 +789,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         (fun (constrs, pats, b) ->
           match pats with
           | Snoc.Lin -> err (Some ctx.loc, "Clause size doesn't match.")
-          | Snoc.Snoc (ps, p) -> Some (constrs @> (idx, p, l), ps, b))
+          | Snoc.Snoc (ps, p) -> Some (constrs @> (n, p, l), ps, b))
         prob.clauses
       |> combine_errors
     in
@@ -817,7 +815,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
           in
           go clauses nm []
         in
-        (* | S x ==> | S (pat$1 ~ Nat) *)
+        (* | S x, { empty } ===> | S pat$0, { pat$0 ~ Nat } *)
         let push_names ctx dcty =
           (* create binding variables over a constructor, using its type sigature *)
           let rec bind_over_pi ctx lvl pi ps acc =
@@ -826,8 +824,8 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               bind_over_pi (bind_var ~id:p ~t:l ctx) (lvl + 1)
                 (cl $$ VLocal (n, lvl, Snoc.empty))
                 ps
-                (acc @> (lvl, l, icit))
-            | [p], t -> some (bind_var ~id:p ~t ctx, acc @> (lvl, t, Exp), t)
+                (acc @> (p, l, icit))
+            | [p], t -> some (bind_var ~id:p ~t ctx, acc @> (p, t, Exp), t)
             | [], t ->
               (* Z ~ Nat; no constructors so we don't need to bind anything. *)
               some (ctx, acc, t)
@@ -911,13 +909,18 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         let* ds = collect_dcons ctx dcon in
         let* hit, missed =
           let matched_on, missed =
-            clauses_matched_on prob.clauses sc
-            |> List.partition (fun n -> List.exists (( = ) n) ds)
+            let hit, missed =
+              clauses_matched_on prob.clauses sc
+              |> List.partition (fun n -> List.exists (( = ) n) ds)
+            in
+            Printf.printf "hit := %d\nmissed := %d\n\n" (List.length hit) (List.length missed);
+            hit, missed
           in
           match missed with
           | [] ->
-            List.partition (fun d -> List.exists (( = ) d) matched_on) ds
-            |> some
+            let hit, missed = List.partition (fun d -> List.exists (( = ) d) matched_on) ds in
+            Printf.printf "hit pt2 := %d\nmissed pt2 := %d\n\n" (List.length hit) (List.length missed);
+            some (hit, missed)
           | cs ->
             let bridge =
               if List.length cs <= 1 then
@@ -931,7 +934,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               )
         in
         let* sctm =
-          let sc = "c_id$" ^ (string_of_int sc) in
           let@ n, _ = lookup_local sc ctx in
           Local (sc, n)
         in
@@ -954,7 +956,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
               in
               let* t = build_tree ctx {clauses; target = prob.target} in
               let args =
-                Snoc.map (fun (p, _, icit) -> let p = "pat$" ^ (string_of_int p) in (loc, icit, PVar p)) pts |> Snoc.to_list
+                Snoc.map (fun (p, _, icit) -> (loc, icit, PVar p)) pts |> Snoc.to_list
               in
               let b = (loc, icit, PCtor (d, args)), nf ctx t in
               build_cases (b :: c_acc) cs
@@ -1060,7 +1062,6 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
                   (show_const c) (fmt_missed lits) )
         in
         let* sctm =
-          let sc = "c_id$" ^ (string_of_int sc) in
           let@ n, _ = lookup_local sc ctx in
           Local (sc, n)
         in
@@ -1164,8 +1165,7 @@ let rec check_definition (ctx : ctx) (loc, (i, args, b, locals)) :
   let* locals, ctx' = check_locals ctx locals in
   let* inline, target = get_target i ctx' in
   let args = insert_implicits args target in
-  let clause = (Snoc.empty, Snoc.of_list args, b) in
-  let@ b = build_tree ctx' {clauses = [clause]; target} in
+  let@ b = build_tree ctx' {clauses = [ Snoc.empty, Snoc.of_list args, b ]; target} in
   let t = force target in
   let d = (loc, (quote ctx'.lvl t, i, nf ctx b)) in
   let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
@@ -1276,7 +1276,7 @@ and get_target i ctx =
 and insert_implicits args target =
   let rec go args target i acc =
     match args, target with
-    | [], _ -> acc
+    | [], _ -> List.rev acc
     | ((loc, Exp, _) :: _) as args, VPi (n, Imp, _, r) ->
        (* we insert an ignored implicit argument when found *)
        let imp_arg = loc, Imp, PVar n in
@@ -1434,12 +1434,6 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
   in
   (* TODO: halt further compilation if a function isn't defined (but has a type signature). *)
   holes := List.filter (fun (_, hi, _) -> hi <> Placeholder) !holes;
-  let pp_entry out = function
-    | n, Solved sol -> Format.fprintf out "%d: solved -> %a" n pp_val sol
-    | n, Unsolved -> Format.fprintf out "%d: unsolved" n
-  in
-  let mctx = IM.to_list !mctx in
-  Format.fprintf Format.std_formatter "mctx:@.  %a@.@." Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out "@.  ") pp_entry) mctx;
   match !holes with
   | [] -> some (n, mods, tdecls, List.rev defs |> List.flatten)
   | _ -> err (None, fmt_holes ())

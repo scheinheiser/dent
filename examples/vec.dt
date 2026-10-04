@@ -12,17 +12,19 @@ data Fin : Nat → U =
 
 data Vec : (n ~ Nat) → (a ~ U) → U =
   | Nil    : ∀ A. Vec Z A
-  | ( @: ) : ∀ A. {n ~ Nat} → (v ~ A) → Vec n A → Vec (S n) A
+  | ( @: ) : ∀ (n ~ Nat) A. (v ~ A) → Vec n A → Vec (S n) A
 
+inline
 dec empty : ∀ a. Vec Z a
 def empty := Nil
 
 dec something : Nat
-def something := S (S (S (S (S Z))))
+def something := S (S (S (S Z)))
 
 dec test : Vec something Int
 def test := 4 @: 3 @: 2 @: 1 @: Nil
 
+inline
 dec len : ∀ (n ~ Nat) A. Vec n A → Nat
 def len {n} _ := n
 

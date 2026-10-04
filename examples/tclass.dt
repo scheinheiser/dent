@@ -1,3 +1,4 @@
+(* possible syntax for typeclasses *)
 module TypeClass
 
 dec ( ∙ ) : ∀ a b c. (b → c) → (a → b) → a → c
@@ -44,9 +45,10 @@ default
 end
 
 data List : U → U =
-  | Nil   : ∀ a. a → List a
+  | Nil   : ∀ a. List a
   | (::)  : ∀ a. a → List a → List a
 
+inline
 dec singleton : ∀ a. a → List a
 def singleton v := [ v ]
 
