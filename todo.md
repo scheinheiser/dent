@@ -5,9 +5,8 @@
 - [x] Parse implicit arguments
 - [x] Mutiple arguments in a single binding (i.e. `(a, b, c : Type)`)
 - [x] Properly desugar record constructors.
-- [ ] Consider pattern synonyms? like in haskell.
 - [x] Add type annotations - `10 ~ Nat`.
-- [x] Add as patterns - either `x@y` or `y as x`, where y is some pattern.
+- [ ] Add as patterns - either `x@y` or `y as x`, where y is some pattern.
 - [x] Add an `inline` keyword to inline a function definition.
 - [ ] Consider adding namespaces within files with a `namespace` and `end` keyword.
 
@@ -23,6 +22,7 @@
   - See examples/tclass.dent for syntax ideas.
 - [ ] Consider adding error recovery, maybe in the form of token insertion (what token you'd expect to be there)?
   - [ ] Remove usage of `Base.Or_error` alongside this change, swap to accumulating errors and then reporting them all at once.
+- [ ] Move function grouping (for argument level pattern matching) to the parser to simplify elaboration.
 
 ## Elaborator
 - [x] Get basic elaboration working (no holes/solving holes, no implicit arguments).
@@ -39,8 +39,9 @@
   - [x] Make sure that aliases, unions and records actually work.
   - [x] Add a pass over functions/expressions to ensure that there aren't any typed holes.
   - [ ] Add impossible patterns (`!` ?) and build the appropriate case for it.
-- [ ] Make implicit arguments work properly.
+- [x] Make implicit arguments work properly.
   - [x] Add `forall`/`∀` qualifier to denote types that are implicit (and are erased).
+- [ ] Review records & fix any bugs.
 - [ ] Add universe polymorphism.
 - [ ] Add type erasure, where you can specify which types can be erased at runtime and which can't.
   - [ ] Implement the algorithm explained in [this paper](https://arxiv.org/pdf/2605.00655)
