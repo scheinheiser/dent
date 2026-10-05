@@ -51,7 +51,7 @@ and definition =
   | Def of
       string
       * ( (located_expr * icit) list
-      * located_expr
+      * located_expr option
       * with_block ) list
 (* identifer, args, optional when-block, body, optional with-block *)
 

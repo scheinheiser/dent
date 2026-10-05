@@ -1000,26 +1000,32 @@ module Parser = struct
       then Lexer.make_err (Some s, "Cannot define a function with a named implicit argument.")
       else List.map (fun (_, p, icit) -> p, icit) args |> ok
     in
-    let* _ =
-      Lexer.consume l ASSIGNMENT "Expected ':=' to seperate a function definition and body."
-    in
-    let* ((loc, _) as body) = parse_expr l 0 om in
-    let@ e, with_block =
-      ( (fun l ->
-          let* _ =
-            Lexer.consume l WITH
-              "Expected 'with' keyword to begin local function definitions."
-          in
-          let* defs =
-            Lexer.list_with_end l (( = ) END) (flip parse_definition om)
-          in
-          let@ e =
-            Lexer.consume_with_pos l END
-              "Expected 'end' keyword after local definitions."
-          in
-          (e, defs))
-      <|> fun _ -> ok (loc, []) )
-        l
+    let@ e, body, with_block =
+      match Lexer.current l with
+      | _, ASSIGNMENT ->
+         Lexer.skip l ~am:1;
+         let* ((loc, _) as body) = parse_expr l 0 om in
+         let@ e, with_block =
+           ( (fun l ->
+                let* _ =
+                  Lexer.consume l WITH
+                    "Expected 'with' keyword to begin local function definitions."
+                in
+                let* defs =
+                  Lexer.list_with_end l (( = ) END) (flip parse_definition om)
+                in
+                let@ e =
+                  Lexer.consume_with_pos l END
+                    "Expected 'end' keyword after local definitions."
+                in
+                (e, defs))
+            <|> fun _ -> ok (loc, []) )
+              l
+         in
+         e, Some body, with_block
+      | _ ->
+         let (e, _), _ = List.rev args |> List.hd in
+         ok (e, None, [])
     in
     (Location.combine s e, Ast.Def (n, [ args, body, with_block ]))
 

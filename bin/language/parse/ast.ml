@@ -54,9 +54,9 @@ and definition =
   | Def of
       string
       * ( (located_expr * icit) list
-      * located_expr
+      * located_expr option
       * with_block ) list
-(* identifer, args, body, optional with-block *)
+(* identifer, args, optional body (for impossible cases), optional with-block *)
 
 and with_block = located_definition list
 
@@ -161,7 +161,7 @@ let rec pp_definition out ((_, def) : located_definition) =
     let pp_bd out (args, b, wb) =
       Format.fprintf out "(@[<v>%s (%a)@,%a@,%a@])" f
         Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_bind) args
-        pp_expr b
+        Format.(pp_print_option ~none:(fun out () -> fprintf out "impossible") pp_expr) b
         pp_with_block wb
     in
     Format.fprintf out "(de@[<v>f@,%a@])" Format.(pp_print_list ~pp_sep:pp_print_cut pp_bd) bds
