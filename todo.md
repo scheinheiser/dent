@@ -9,6 +9,7 @@
 - [ ] Add as patterns - either `x@y` or `y as x`, where y is some pattern.
 - [x] Add an `inline` keyword to inline a function definition.
 - [ ] Consider adding namespaces within files with a `namespace` and `end` keyword.
+- [ ] Add a `function` style keyword for shorthand `match`es.
 
 ## Diagnostics
 - [x] Make a logging library
@@ -41,6 +42,7 @@
   - [ ] Add impossible patterns (`!` ?) and build the appropriate case for it.
 - [x] Make implicit arguments work properly.
   - [x] Add `forall`/`∀` qualifier to denote types that are implicit (and are erased).
+- [ ] Properly evaluate `match` cases.
 - [ ] Review records & fix any bugs.
 - [ ] Add universe polymorphism.
 - [ ] Add type erasure, where you can specify which types can be erased at runtime and which can't.

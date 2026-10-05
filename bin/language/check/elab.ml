@@ -1000,6 +1000,7 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
         in
         Match (sctm, hit)
       | PConst c ->
+        (* a looser equality check *)
         let equal_const l r =
           match (l, r) with
           | Int _, Int _
@@ -1170,7 +1171,7 @@ let rec check_definition (ctx : ctx) (loc, (i, bds)) :
   let* clauses =
     List.map
       (fun (args, b, _) ->
-        let@ args = List.map (fun (p, icit) -> to_pattern ctx p icit) args |> combine_errors in
+        let@ args = List.rev args |> List.map (fun (p, icit) -> to_pattern ctx p icit) |> combine_errors in
         Snoc.empty, Snoc.of_list @@ insert_implicits args target, b)
       bds |> combine_errors
   in
