@@ -1160,65 +1160,27 @@ and build_tree (ctx : ctx) (prob : problem) : tm result =
       | _ -> Error.internal "unsplittable pattern from find_split."))
   | _ -> Error.internal "something is really wrong in build_tree"
 
-let rec check_definition (ctx : ctx) (loc, (i, args, b, locals)) :
+let rec check_definition (ctx : ctx) (loc, (i, bds)) :
     (located_definition list * ctx) result =
-  let* locals, ctx' = check_locals ctx locals in
+  let* locals, ctx' =
+    List.map (fun (_, _, lcs) -> lcs) bds |> List.flatten |>
+    check_locals ctx
+  in
   let* inline, target = get_target i ctx' in
-  let args = insert_implicits args target in
-  let@ b = build_tree ctx' {clauses = [ Snoc.empty, Snoc.of_list args, b ]; target} in
+  let* clauses =
+    List.map
+      (fun (args, b, _) ->
+        let@ args = List.map (fun (p, icit) -> to_pattern ctx p icit) args |> combine_errors in
+        Snoc.empty, Snoc.of_list @@ insert_implicits args target, b)
+      bds |> combine_errors
+  in
+  let@ b = build_tree ctx' {clauses; target} in
   let t = force target in
   let d = (loc, (quote ctx'.lvl t, i, nf ctx b)) in
   let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
   (d :: locals, ctx)
 
-and check_flpm ctx ((loc, (i, args, b, locals)) as def) ds =
-  let* remaining, matched =
-    let rec go failed_acc acc = function
-      | [] -> Some (failed_acc, acc)
-      | ((_, (i', args', _, _)) as d) :: ds
-        when i' = i && List.length args = List.length args' ->
-        let* r = List.map2 (equal_pat ctx) args args' |> combine_errors in
-        if List.for_all id r then
-          go failed_acc (d :: acc) ds
-        else
-          go (d :: failed_acc) acc ds
-      | d :: ds -> go (d :: failed_acc) acc ds
-    in
-    go [] [] ds
-  in
-  let@ ds, ctx =
-    match matched with
-    | [] -> check_definition ctx def
-    | ms' ->
-      let ms' = List.rev ms' in
-      let ms : clause list =
-        List.map
-          (fun (_, (_, args, b, _)) ->
-            (Snoc.empty, Snoc.of_list args, b))
-          ms'
-      in
-      let* locals, ctx' = check_locals ctx locals in
-      let* locals', ctx' =
-        let rec go acc ctx = function
-          | [] -> Some (List.flatten acc, ctx)
-          | l :: ls ->
-            let* l, ctx = check_locals ctx l in
-            go (l :: acc) ctx ls
-        in
-        go [] ctx' @@ List.map (fun (_, (_, _, _, locals)) -> locals) ms'
-      in
-      let* inline, target = get_target i ctx' in
-      let args = insert_implicits args target in
-      let def = (Snoc.empty, Snoc.of_list args, b) in
-      let@ b = build_tree ctx' {clauses = def :: ms; target} in
-      let t = force target in
-      let ctx = define_func ~id:i ~t ~v:(inline, b) ctx in
-      let b = (loc, (quote ctx'.lvl t, i, b)) in
-      ((b :: locals) @ locals', ctx)
-  in
-  (ds, ctx, List.rev remaining)
-
-and check_locals ctx locals =
+and check_locals (ctx : ctx) (locals : Ast.located_definition list) =
   match locals with
   | [] -> some ([], ctx)
   | _ ->
@@ -1240,20 +1202,15 @@ and check_locals ctx locals =
     in
     let rec go ctx acc = function
       | [] -> (List.rev acc, ctx)
-      | (loc, (i, args, b, locals)) :: ds -> (
-        let args = List.map (fun (p, icit) -> to_pattern ctx p icit) args |> combine_errors in
-        match args with
+      | (loc, (i, bds)) :: ds -> (
+        match check_definition ctx (loc, (i, bds)) with
         | None -> go ctx (None :: acc) ds
-        | Some args -> (
-          let d = (loc, (i, args, b, locals)) in
-          match check_definition ctx d with
-          | Some (d, ctx) -> go ctx (Some d :: acc) ds
-          | None -> go ctx (None :: acc) ds))
+        | Some (d, ctx) -> go ctx (Some d :: acc) ds)
     in
     let r, ctx =
       List.filter_map
         (function
-          | loc, Ast.Def (i, args, b, locals) -> Some (loc, (i, args, b, locals))
+          | loc, Ast.Def (i, bds) -> Some (loc, (i, bds))
           | _ -> None)
         locals
       |> go ctx []
@@ -1410,25 +1367,17 @@ let check_program ((n, mods, tdecls, defs) : Ast.program) : program result =
     let defs =
       List.filter_map
         (function
-          | loc, Ast.Def (i, args, b, locals) ->
-            Some (loc, (i, args, b, locals))
+          | loc, Ast.Def (i, bds) ->
+            Some (loc, (i, bds))
           | _ -> None)
         defs
-    in
-    let* defs =
-      List.map
-        (fun (loc, (i, args, b, locals)) ->
-          let@ args = List.map (fun (a, icit) -> to_pattern ctx a icit) args |> combine_errors in
-          (loc, (i, args, b, locals)))
-        defs
-      |> combine_errors
     in
     let rec go ctx acc = function
       | [] -> acc
       | d :: ds -> (
-        match check_flpm ctx d ds with
+        match check_definition ctx d with
         | None -> go ctx (None :: acc) ds
-        | Some (d, ctx, ds) -> go (flush_locals ctx) (Some d :: acc) ds)
+        | Some (d, ctx) -> go (flush_locals ctx) (Some d :: acc) ds)
     in
     go ctx [] defs |> combine_errors
   in

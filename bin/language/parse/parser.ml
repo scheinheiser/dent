@@ -17,7 +17,14 @@ let fresh =
     incr i;
     !i
 
+(* constructor to decl map, for function grouping *)
+module TM = Map.Make (String)
+
+type decl_map = string TM.t
+
 let fresh_om () : operator_map = OM.empty
+let fresh_dm () : decl_map = TM.empty
+
 let ( let* ) = Base.Or_error.( >>= )
 let ( let@ ) = Base.Or_error.( >>| )
 let id = Fun.id
@@ -240,6 +247,90 @@ end
 
 let ( <|> ) l r s = Lexer.attempt s l r
 let ok (v : 'a) : 'a Lexer.result = Base.Result.Ok v
+
+(* function grouping *)
+let fill_dm (decls: Ast.located_ty_decl list) : decl_map =
+  let rec go decls acc =
+    match decls with
+    | [] -> acc
+    | (_, (cons, Ast.Variant (_, vars))) :: decls ->
+       let vars = List.map fst vars in
+       go decls @@ List.fold_left (fun acc n -> TM.add n cons acc) acc vars
+    | (_, (cons, Ast.Record (n, _, _))) :: decls ->
+       go decls @@ TM.add n cons acc
+    | _ :: decls -> go decls acc
+  in
+  go decls (fresh_dm ())
+
+let rec equal_pat (dm : decl_map) (((_, l), icit) : Ast.located_expr * icit) (((_, r), icit') : Ast.located_expr * icit) : bool =
+  let ( @> ) = Snoc.( @> ) in
+  let rec flatten ap acc =
+    match ap with
+    | Ast.Ap (_, (_, rest), (_, s, _)) -> flatten rest (acc @> s)
+    | e -> (e, acc)
+  in
+  let res =
+    match (l, r) with
+    | Ast.Hole, _ | _, Ast.Hole -> true
+    | Ast.Var (Ident _), _ | _, Ast.Var (Ident _) -> true
+    | Ast.Const l, Ast.Const r -> l %= r
+    | Ast.TypeLit l, Ast.TypeLit r -> l #= r
+    | Ast.Impossible, Ast.Impossible -> true
+    | Ast.Tuple (l, r), Ast.Tuple (l', r') ->
+      let l = equal_pat dm (l, icit) (l', icit') in
+      let r = equal_pat dm (r, icit) (r', icit') in
+      l && r
+    | Ast.Ap (_, _, _), Ast.Ap (_, _, _) -> (
+      let base, _ = flatten l Snoc.empty in
+      let base', _ = flatten r Snoc.empty in
+      match base, base' with
+      | Ast.Var (Ident c), Ast.Var (Ident c') -> (
+        let e = TM.find_opt c dm in
+        let e' = TM.find_opt c' dm in
+        match e, e' with
+        | Some n, Some n' -> n = n'
+        | _ -> false)
+      | _ -> false)
+    | Ast.RCons (cons, _), Ast.RCons (cons', _) -> (
+       let e = TM.find_opt cons dm in
+       let e' = TM.find_opt cons' dm in
+       match e, e' with
+       | Some n, Some n' -> n = n'
+       | _ -> false)
+    | _ -> false
+  in
+  res && icit = icit'
+
+let group_defs (dm : decl_map) defs =
+  let go (loc, (i, bds)) defs =
+    let default = loc, Ast.Def (i, bds) in
+    let (args, _, _) as base = List.hd bds in (* we know that there's only one branch after parsing. *)
+    match List.partition (function | (_, Ast.Def (i', _)) -> i = i' | _ -> false) defs with
+    | [], fails -> default, fails
+    | possibles, fails -> (
+      let equal_args args args' =
+        (List.length args) = (List.length args')
+          && (List.map2 (equal_pat dm) args args' |> List.for_all id)
+      in
+      match List.partition (function | (_, Ast.Def (_, [ args', _, _ ])) -> equal_args args args' | _ -> false) possibles with
+      | [], _ -> default, fails
+      | sucs, fails' ->
+         let fails = fails' @ fails in
+         let bds =
+           let bds = List.filter_map (function | (_, Ast.Def (_, bds)) -> Some bds | _ -> None ) sucs in
+           base :: List.flatten bds
+         in
+         (loc, Ast.Def (i, bds)), fails)
+  in
+  let rec aux defs acc =
+    match defs with
+    | [] -> List.rev acc
+    | (loc, Ast.Def (i, bds)) :: defs ->
+       let d, defs = go (loc, (i, bds)) defs in
+       aux defs (d :: acc)
+    | d :: defs -> aux defs (d :: acc)
+  in
+  aux defs []
 
 module Parser = struct
   open Token
@@ -930,7 +1021,7 @@ module Parser = struct
       <|> fun _ -> ok (loc, []) )
         l
     in
-    (Location.combine s e, Ast.Def (n, args, body, with_block))
+    (Location.combine s e, Ast.Def (n, [ args, body, with_block ]))
 
   and parse_dec (l : Lexer.t) (inline : bool) (om : operator_map) :
       Ast.located_definition Lexer.result =
@@ -1128,11 +1219,13 @@ module Parser = struct
         prog
     in
     let body =
+      let dm = fill_dm tydecls in
       List.filter_map
         (function
           | Ast.TDef d -> Some d
           | _ -> None)
         prog
+      |>  group_defs dm
     in
     (mod', imports, tydecls, body)
 end

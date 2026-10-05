@@ -22,7 +22,7 @@
   - See examples/tclass.dent for syntax ideas.
 - [ ] Consider adding error recovery, maybe in the form of token insertion (what token you'd expect to be there)?
   - [ ] Remove usage of `Base.Or_error` alongside this change, swap to accumulating errors and then reporting them all at once.
-- [ ] Move function grouping (for argument level pattern matching) to the parser to simplify elaboration.
+- [x] Move function grouping (for argument level pattern matching) to the parser to simplify elaboration.
 
 ## Elaborator
 - [x] Get basic elaboration working (no holes/solving holes, no implicit arguments).

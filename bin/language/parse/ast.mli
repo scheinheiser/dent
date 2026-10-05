@@ -50,9 +50,9 @@ and definition =
   | Dec of bool * string * located_expr
   | Def of
       string
-      * (located_expr * icit) list
+      * ( (located_expr * icit) list
       * located_expr
-      * with_block
+      * with_block ) list
 (* identifer, args, optional when-block, body, optional with-block *)
 
 and with_block = located_definition list

@@ -53,9 +53,9 @@ and definition =
   | Dec of bool * string * located_expr
   | Def of
       string
-      * (located_expr * icit) list
+      * ( (located_expr * icit) list
       * located_expr
-      * with_block
+      * with_block ) list
 (* identifer, args, body, optional with-block *)
 
 and with_block = located_definition list
@@ -152,15 +152,19 @@ let rec pp_definition out ((_, def) : located_definition) =
      if inline
      then Format.fprintf out "(inline %s)" d
      else Format.fprintf out "(%s)" d
-  | Def (f, args, body, with_block) ->
+  | Def (f, bds) ->
     let pp_bind out (pat, icit) =
       match icit with
       | Exp -> pp_expr out pat
       | Imp -> Format.fprintf out "{ %a }" pp_expr pat
     in
-    Format.fprintf out "(de@[<v>f %s (%a)@,%a@,%a@])" f
-      Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_bind)
-      args pp_expr body pp_with_block with_block
+    let pp_bd out (args, b, wb) =
+      Format.fprintf out "(@[<v>%s (%a)@,%a@,%a@])" f
+        Format.(pp_print_list ~pp_sep:(fun out () -> fprintf out " ") pp_bind) args
+        pp_expr b
+        pp_with_block wb
+    in
+    Format.fprintf out "(de@[<v>f@,%a@])" Format.(pp_print_list ~pp_sep:pp_print_cut pp_bd) bds
 
 and pp_with_block out (with_block : with_block) =
   let block out () =
