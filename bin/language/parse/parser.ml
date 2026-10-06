@@ -275,7 +275,7 @@ let rec equal_pat (dm : decl_map) (((_, l), icit) : Ast.located_expr * icit) (((
     | Ast.Var (Ident _), _ | _, Ast.Var (Ident _) -> true
     | Ast.Const l, Ast.Const r -> l %= r
     | Ast.TypeLit l, Ast.TypeLit r -> l #= r
-    | Ast.Impossible, Ast.Impossible -> true
+    | Ast.Impossible, _ | _, Ast.Impossible -> true
     | Ast.Tuple (l, r), Ast.Tuple (l', r') ->
       let l = equal_pat dm (l, icit) (l', icit') in
       let r = equal_pat dm (r, icit) (r', icit') in
@@ -309,8 +309,21 @@ let group_defs (dm : decl_map) defs =
     | [], fails -> default, fails
     | possibles, fails -> (
       let equal_args args args' =
-        (List.length args) = (List.length args')
-          && (List.map2 (equal_pat dm) args args' |> List.for_all id)
+        (* a custom for_all2 that works irrespective of list lengths for cases like this: *)
+        (* def myFunc { n } { k } x y := ... *)
+        (* def myFunc { n } x y := ...       *)
+        (* this should be grouped, but it would cause an exception with the normal for_all2 *)
+        let rec for_all2' p xs ys =
+          match xs, ys with
+          | [], [] -> true
+          | x :: xs, y :: ys -> p x y && for_all2' p xs ys
+          | [], _ | _, [] -> true
+        in
+        let exp_args, imp_args = List.partition (function (_, Exp) -> true | _ -> false) args in
+        let exp_args', imp_args' = List.partition (function (_, Exp) -> true | _ -> false) args' in
+        (List.length exp_args) = (List.length exp_args')
+        && (List.for_all2 (equal_pat dm) exp_args exp_args') (* the explicit arguments MUST be the same. *)
+        && (for_all2' (equal_pat dm) imp_args imp_args')
       in
       match List.partition (function | (_, Ast.Def (_, [ args', _, _ ])) -> equal_args args args' | _ -> false) possibles with
       | [], _ -> default, fails
