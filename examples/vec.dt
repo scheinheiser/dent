@@ -10,23 +10,23 @@ data Fin : Nat → U =
   | FS : ∀ (k ~ Nat). Fin k → Fin (S k)
 *)
 
-data Vec : (n ~ Nat) → (a ~ U) → U =
+data Vec : Nat → U → U =
   | Nil    : ∀ A. Vec Z A
   | ( @: ) : ∀ (n ~ Nat) A. (v ~ A) → Vec n A → Vec (S n) A
 
+(*
 inline
 dec empty : ∀ a. Vec Z a
 def empty := Nil
-
-dec something : Nat
-def something := S (S (S (S Z)))
-
-dec test : Vec something Int
-def test := 4 @: 3 @: 2 @: 1 @: Nil
+*)
 
 inline
 dec len : ∀ (n ~ Nat) A. Vec n A → Nat
 def len {n} _ := n
+
+dec plus : Nat → Nat → Nat
+def plus n Z := n
+def plus n (S m) := S (n `plus` m)
 
 (*
 dec plus : Nat → Nat → Nat
@@ -34,11 +34,8 @@ dec plus : Nat → Nat → Nat
 dec append : ∀ (n ~ Nat) (m ~ Nat) a. Vec m a → Vec n a → Vec (plus m n) a
 def append Nil r := r
 def append (l @: ls) r := l @: (append ls r)
-*)
 
-(*
 dec index : ∀ (n ~ Nat) a. Fin n → Vec n a → a
 def index FZ (v @: _) := v
 def index (FS n) (_ @: vs) := index n vs
-def index ! Nil (* this case is impossible *)
 *)

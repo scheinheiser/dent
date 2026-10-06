@@ -20,6 +20,7 @@ let rec eval (env : env) (tm : tm) : val_ =
     let c = eval env c in
     VMatch (c, env, bs)
   | Let (_, _, v, n) -> eval (env @> eval env v) n
+  | Erased -> VErased
 
 (* β-reduction. *)
 and ( $$ ) ((env, t) : closure) (v : val_) : val_ = eval (env @> v) t
@@ -117,6 +118,7 @@ let rec quote (lvl : lvl) (v : val_) : tm =
     Pi (n, icit, l, r)
   | VMeta (m, sp) -> quote_sp lvl (Mv m) sp
   | VLocal (i, l, sp) -> quote_sp lvl (Local (i, to_ix lvl l)) sp
+  | VErased -> Erased
 
 (* unroll a flex/rigid into a set of applications *)
 and quote_sp (lvl : lvl) (v : tm) (sp : spine) : tm =

@@ -19,7 +19,7 @@ type located_pattern = Location.t * icit * pattern
 
 and pattern =
   | PWild (* _ *)
-  | PAbs (* . - an impossible pattern *)
+  | PAbs (* ! - an impossible/absurd pattern *)
   | PConst of const
   | PTypeLit of prim
   | PVar of string
@@ -47,6 +47,7 @@ type tm =
   | Const of const
   | TypeLit of prim
   | Pi of string * icit * tm * tm (* (α : β) → γ | {α : β} → γ *)
+  | Erased
 
 (* values for NbE *)
 and val_ =
@@ -59,6 +60,7 @@ and val_ =
   | VPi of string * icit * val_ * closure
   | VTypeLit of prim
   | VConst of const
+  | VErased
 
 and env = val_ Snoc.t
 
@@ -146,7 +148,8 @@ let rec pp_tm out (tm : tm) =
     in
     Format.fprintf out "?meta%d (%s)" m
       (Snoc.map to_str bds
-      |> Snoc.fold_left (fun acc v -> Printf.sprintf "%s %s" v acc) "")
+       |> Snoc.fold_left (fun acc v -> Printf.sprintf "%s %s" v acc) "")
+  | Erased -> Format.fprintf out "erased"
 
 let rec pp_val out (v : val_) =
   match v with
@@ -167,6 +170,7 @@ let rec pp_val out (v : val_) =
     Format.fprintf out "%s -> %a" (wrap_icit icit l) pp_closure cl
   | VLocal (i, n, sp) -> Format.fprintf out "%s/%d (%s)" i n (Snoc.map fst sp |> pp_sp pp_val)
   | VMeta (m, sp) -> Format.fprintf out "?meta%d (%s)" m (Snoc.map fst sp |> pp_sp pp_val)
+  | VErased -> Format.fprintf out "erased"
 
 and pp_sp pp_func s =
   let open Snoc in
